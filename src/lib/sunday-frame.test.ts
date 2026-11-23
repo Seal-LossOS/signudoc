@@ -67,10 +67,31 @@ describe("frameMessageFor", () => {
     }
   });
 
-  it("reports a page Sunday does not list as ready, leaving the choice to Sunday", () => {
+  // Sunday drops a ready whose path it does not address and shows Failed after
+  // 20 s, so the owner sent to /two-step-setup could never finish it framed.
+  it("reports a page Sunday does not address without a path", () => {
+    for (const first of [true, false]) {
+      const message = frameMessageFor({
+        first,
+        pathname: "/two-step-setup",
+        search: "",
+      });
+
+      assert.deepEqual(message, {
+        type: first ? "signudoc:ready" : "signudoc:navigated",
+      });
+      assert.equal("path" in message, false);
+    }
+  });
+
+  it("keeps the path of a page Sunday addresses, with its query", () => {
     assert.deepEqual(
-      frameMessageFor({ first: true, pathname: "/two-step-setup", search: "" }),
-      { path: "/two-step-setup", type: "signudoc:ready" },
+      frameMessageFor({
+        first: true,
+        pathname: "/settings/security",
+        search: "tab=keys",
+      }),
+      { path: "/settings/security?tab=keys", type: "signudoc:ready" },
     );
   });
 });

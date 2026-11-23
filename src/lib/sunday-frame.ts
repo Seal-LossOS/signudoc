@@ -2,9 +2,12 @@
 // Sunday's address bar and states, never authority. Sunday checks the
 // sender and parses each message itself.
 
+import { isSafeSundayNext } from "./auth/sunday-path.ts";
+
+/** No path: a page Sunday does not address, such as /two-step-setup. */
 export type SundayFrameMessage =
-  | { path: string; type: "signudoc:navigated" }
-  | { path: string; type: "signudoc:ready" }
+  | { path?: string; type: "signudoc:navigated" }
+  | { path?: string; type: "signudoc:ready" }
   | { type: "signudoc:signed-out" };
 
 /** Escapes what Sunday's path pattern refuses: useSearchParams writes a space as "+" and keeps "*", and both would drop the message. */
@@ -28,12 +31,13 @@ export function frameMessageFor(input: {
     return { type: "signudoc:signed-out" };
   }
 
+  const type = input.first ? "signudoc:ready" : "signudoc:navigated";
   const search = input.search.replace(/^\?/, "");
   const path = toSafePath(
     search ? `${input.pathname}?${search}` : input.pathname,
   );
 
-  return input.first
-    ? { path, type: "signudoc:ready" }
-    : { path, type: "signudoc:navigated" };
+  // Sunday drops a message whose path it does not address; a dropped ready
+  // would leave it Loading until its 20 s guard tears the frame down.
+  return isSafeSundayNext(path) ? { path, type } : { type };
 }

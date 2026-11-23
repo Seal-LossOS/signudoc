@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ReviewShell } from "@/components/envelopes/review-shell";
 import { getAuthSession } from "@/lib/auth/server";
 import { getDb } from "@/lib/db/connection";
+import { defaultDelivery, emailDeliveryAvailable } from "@/lib/delivery";
 import { getReviewEnvelopeDataForUser } from "@/lib/envelopes";
 
 type ReviewPageProps = {
@@ -40,6 +41,8 @@ export default async function ReviewPage({ params }: ReviewPageProps) {
 
   return (
     <ReviewShell
+      delivery={defaultDelivery()}
+      emailAvailable={emailDeliveryAvailable()}
       envelopeId={id}
       initialState={initialState}
       key={id}

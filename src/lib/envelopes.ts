@@ -3860,8 +3860,14 @@ export async function correctSentEnvelopeSigner(
     );
 
     // A link envelope's sender delivers the new link: the next Copy finds
-    // the link replaced and draws a fresh one (signing-link-copy.ts).
-    if (invitationNeeded && issuedLink && envelope.delivery === "email") {
+    // the link replaced and draws a fresh one (signing-link-copy.ts). So does
+    // an emailed envelope's sender while email is off, since nothing is sent.
+    if (
+      invitationNeeded &&
+      issuedLink &&
+      envelope.delivery === "email" &&
+      !isEmailOff()
+    ) {
       const mailer =
         emailService ??
         createEmailService(

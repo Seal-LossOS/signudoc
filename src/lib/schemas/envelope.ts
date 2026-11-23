@@ -52,6 +52,8 @@ export const sendEnvelopeOptionsSchema = z.object({
   reminderIntervalDays: reminderIntervalDaysSchema.optional(),
   /** Simple unless the install has a signing provider. */
   signatureLevel: z.enum(["simple", "advanced", "qualified"]).optional(),
+  /** The UI's choice; unset means the install's default (DEFAULT_SIGNING_DELIVERY). */
+  delivery: z.enum(["email", "link"]).optional(),
 });
 
 export const changeRemindersSchema = z.object({

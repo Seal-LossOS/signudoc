@@ -31,6 +31,14 @@ const redirectDelayMs = 1200;
 const defaultSendErrorMessage = "Failed to send. Please try again.";
 
 type ReviewShellProps = {
+  /**
+   * The install's delivery for a send from this screen. With "link" the
+   * sender copies each signer's link from the envelope page; this screen
+   * offers no emailed invitations then.
+   */
+  delivery?: "email" | "link";
+  /** False while the install sends no email at all. */
+  emailAvailable?: boolean;
   envelopeId: string;
   initialState?: "error";
   record?: ReviewEnvelopeData;
@@ -85,11 +93,18 @@ function describeSignatureLevel(level: SignatureLevel, providerName: string) {
   }
 }
 
-function buildSuccessMessage(firstSignerName: string) {
-  return `Envelope sent. ${firstSignerName} has been notified.`;
+function buildSuccessMessage(
+  firstSignerName: string,
+  delivery: "email" | "link",
+) {
+  return delivery === "link"
+    ? `Envelope sent. Copy ${firstSignerName}'s link from the envelope page.`
+    : `Envelope sent. ${firstSignerName} has been notified.`;
 }
 
 export function ReviewShell({
+  delivery = "email",
+  emailAvailable = true,
   envelopeId,
   initialState,
   record,
@@ -152,6 +167,9 @@ export function ReviewShell({
           permittedUseConfirmed: true,
           reminderIntervalDays: reminderDays,
           ...(record?.signingProvider ? { signatureLevel } : {}),
+          // Named, so a change to the install's email between this page and
+          // the send cannot email the signers this screen said it would not.
+          ...(delivery === "link" ? { delivery } : {}),
         }),
         headers: {
           "content-type": "application/json",
@@ -175,7 +193,7 @@ export function ReviewShell({
       const redirectPath = payload?.redirectPath || `/envelopes/${envelopeId}`;
 
       setIsConfirmationOpen(false);
-      setNotice(buildSuccessMessage(notifiedSignerName));
+      setNotice(buildSuccessMessage(notifiedSignerName, delivery));
       setSendPhase("idle");
       sendTimeoutRef.current = window.setTimeout(() => {
         window.location.assign(redirectPath);
@@ -396,9 +414,15 @@ export function ReviewShell({
             ) : null}
 
             <p className="notice notice-accent mt-4 font-medium">
-              {signsAtTheSameTime
-                ? "After you send, everyone numbered 1 receives an email with a link to sign. Signers with the same number sign at the same time, and the next number is invited once they have all signed."
-                : "After you send, Signer 1 will receive an email with a link to sign. Each signer is notified in order after the previous signer completes."}
+              {delivery === "link"
+                ? `${emailAvailable ? "SignuDoc emails signers no link to sign." : "Signers get no email."} ${
+                    signsAtTheSameTime
+                      ? "After you send, copy the link of everyone numbered 1 from the envelope page and send it to them yourself. The next number's links can be copied once they have all signed."
+                      : "After you send, copy Signer 1's link from the envelope page and send it to them yourself. Each signer's link can be copied once the previous signer completes."
+                  }`
+                : signsAtTheSameTime
+                  ? "After you send, everyone numbered 1 receives an email with a link to sign. Signers with the same number sign at the same time, and the next number is invited once they have all signed."
+                  : "After you send, Signer 1 will receive an email with a link to sign. Each signer is notified in order after the previous signer completes."}
             </p>
 
             <div className="well mt-4 p-4">
@@ -526,6 +550,7 @@ export function ReviewShell({
               : (firstSigner?.name ?? "Signer 1")
           }
           firstStepSize={firstStepNames.length}
+          linkDelivery={delivery === "link"}
           isSending={sendPhase === "sending"}
           onCancel={closeConfirmation}
           onConfirm={handleConfirmSend}
@@ -560,6 +585,8 @@ type SendConfirmationDialogProps = {
   firstSignerName: string;
   /** How many signers are invited at once when it is sent. */
   firstStepSize: number;
+  /** The sender delivers each signer's link; nobody is emailed. */
+  linkDelivery: boolean;
   isSending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -589,6 +616,7 @@ function SendConfirmationDialog({
   firstSignerName,
   firstStepSize,
   isSending,
+  linkDelivery,
   onCancel,
   onConfirm,
   signatureType,
@@ -617,11 +645,13 @@ function SendConfirmationDialog({
                 <p>
                   &quot;{title}&quot; will be sent to{" "}
                   {describeSigningOrderPeople(signerCount, approverCount)}.{" "}
-                  {peopleCount === 1
-                    ? `${firstSignerName} will be notified immediately.`
-                    : firstStepSize > 1
-                      ? `${firstSignerName} will be notified immediately, ${approverCount > 0 ? "to act" : "to sign"} at the same time.`
-                      : `The first ${firstLabel} (${firstSignerName}) will be notified immediately.`}{" "}
+                  {linkDelivery
+                    ? `Nobody is emailed: copy ${firstSignerName}'s link from the envelope page.`
+                    : peopleCount === 1
+                      ? `${firstSignerName} will be notified immediately.`
+                      : firstStepSize > 1
+                        ? `${firstSignerName} will be notified immediately, ${approverCount > 0 ? "to act" : "to sign"} at the same time.`
+                        : `The first ${firstLabel} (${firstSignerName}) will be notified immediately.`}{" "}
                   The request expires in {deadlineDays} days.
                 </p>
                 {signatureType ? (

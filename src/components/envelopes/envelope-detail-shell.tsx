@@ -35,6 +35,7 @@ import {
   ENVELOPE_DEADLINE_DAY_OPTIONS,
   ENVELOPE_REMINDER_DAY_OPTIONS,
 } from "@/lib/types/domain";
+import { SignerLinkButton } from "./signer-link-button";
 import { getSignerPalette } from "./signer-palette";
 
 /** A finished envelope an administrator has scheduled to be deleted. */
@@ -61,6 +62,12 @@ type EnvelopeDetailShellProps = {
   ownerListView?: "all" | "team";
   record?: EnvelopeDetailData;
   scheduledDeletion?: EnvelopeDeletionNotice;
+  /**
+   * The sender copies each signer's link and delivers it: a link-delivery
+   * envelope, or an emailed one while email is off. SignuDoc sends them no
+   * invitation or reminder.
+   */
+  signingLinks?: boolean;
 };
 
 type EnvelopeStatus = "draft" | "sent" | "completed" | "declined" | "voided";
@@ -158,6 +165,7 @@ export function EnvelopeDetailShell({
   ownerListView = "all",
   record,
   scheduledDeletion,
+  signingLinks = false,
 }: EnvelopeDetailShellProps) {
   const isOwnEnvelope = ownerLabel === undefined;
   const [activeModal, setActiveModal] = useState<ModalState>(null);
@@ -240,7 +248,9 @@ export function EnvelopeDetailShell({
     manualReminderState !== null &&
     !manualReminderState.canSend;
   const reminderHelperText =
-    activeRecord.status === "sent" && manualReminderState?.nextAvailableAtLabel
+    activeRecord.status === "sent" &&
+    !signingLinks &&
+    manualReminderState?.nextAvailableAtLabel
       ? `You can send another reminder after ${manualReminderState.nextAvailableAtLabel}.`
       : null;
   const deadlineText = !deadline
@@ -665,13 +675,16 @@ export function EnvelopeDetailShell({
                 >
                   Void envelope
                 </ShellButton>
-                <ShellButton
-                  disabled={!activeSigner || reminderLimited}
-                  loading={isSendingReminder}
-                  onClick={handleSendReminder}
-                >
-                  Send reminder
-                </ShellButton>
+                {/* Reminders are refused when the sender delivers the links. */}
+                {signingLinks ? null : (
+                  <ShellButton
+                    disabled={!activeSigner || reminderLimited}
+                    loading={isSendingReminder}
+                    onClick={handleSendReminder}
+                  >
+                    Send reminder
+                  </ShellButton>
+                )}
               </>
             ) : null}
 
@@ -817,7 +830,7 @@ export function EnvelopeDetailShell({
           </div>
         ) : null}
 
-        {deadline ? (
+        {deadline && !signingLinks ? (
           <div className="well mt-3 flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm leading-6 text-(--secondary)">
               {remindersText}
@@ -972,6 +985,16 @@ export function EnvelopeDetailShell({
                               Change
                             </button>
                           ) : null}
+                          {isOwnEnvelope &&
+                          signingLinks &&
+                          activeRecord.status === "sent" ? (
+                            <SignerLinkButton
+                              envelopeId={envelopeId}
+                              signerId={signer.id}
+                              signerName={signer.name}
+                              status={signer.status}
+                            />
+                          ) : null}
                         </div>
                       </div>
 
@@ -1084,6 +1107,7 @@ export function EnvelopeDetailShell({
           }}
           onConfirm={handleConfirmCorrectSigner}
           processing={isCorrectingSigner}
+          signingLinks={signingLinks}
         />
       ) : null}
 
@@ -1476,6 +1500,8 @@ type CorrectSignerDialogProps = {
   onCancel: () => void;
   onConfirm: (next: { email: string; name: string }) => void | Promise<void>;
   processing?: boolean;
+  /** The sender delivers the links, so no invitation is emailed. */
+  signingLinks?: boolean;
 };
 
 function CorrectSignerDialog({
@@ -1485,6 +1511,7 @@ function CorrectSignerDialog({
   onCancel,
   onConfirm,
   processing = false,
+  signingLinks = false,
 }: CorrectSignerDialogProps) {
   const [nextName, setNextName] = useState(name);
   const [nextEmail, setNextEmail] = useState(email);
@@ -1506,8 +1533,10 @@ function CorrectSignerDialog({
               <div className="space-y-2 text-sm leading-6 text-(--secondary)">
                 <p>
                   The signing link already sent to this person will stop
-                  working. If it is their turn, a new invitation goes to the
-                  corrected address.
+                  working.{" "}
+                  {signingLinks
+                    ? "If it is their turn, copy their new link from this page and send it to them."
+                    : "If it is their turn, a new invitation goes to the corrected address."}
                 </p>
               </div>
             </DialogDescription>

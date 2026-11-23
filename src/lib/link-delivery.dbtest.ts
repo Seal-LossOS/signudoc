@@ -511,6 +511,42 @@ test("an emailed envelope's link can be copied once email is off", async () => {
   assert.equal((await copy(draft)).url, link.url);
 });
 
+test("a correction on an emailed envelope while email is off says no invitation went", async () => {
+  const draft = await createDraftEnvelope(1);
+
+  await sendDraftEnvelope(
+    draft.userId,
+    draft.envelopeId,
+    { ...SENDER, delivery: "email" },
+    { database },
+  );
+  process.env.EMAIL_DRIVER = "off";
+
+  const before = await copy(draft);
+  const corrected = await correctSentEnvelopeSigner(
+    draft.userId,
+    draft.envelopeId,
+    draft.signers[0]!.id,
+    { email: `fixed-${randomUUID()}@example.test` },
+    SENDER,
+    { database },
+  );
+  const emailed = await database.query(
+    `select 1 from audit_events where envelope_id = $1 and event = 'email_sent' and metadata->>'recipient' = $2`,
+    [draft.envelopeId, corrected.email],
+  );
+
+  // The off driver sent nothing, so the sender must copy the new link.
+  assert.equal(corrected.invitationSent, false);
+  assert.equal(emailed.rowCount, 0);
+  assert.equal(await opens(before.url), false);
+
+  const after = await copy(draft);
+
+  assert.notEqual(after.url, before.url);
+  assert.ok(await opens(after.url));
+});
+
 test("New link kills the old one", async () => {
   const draft = await sendByLink();
   const old = await copy(draft);

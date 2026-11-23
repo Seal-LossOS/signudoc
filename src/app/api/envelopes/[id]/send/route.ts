@@ -25,6 +25,7 @@ type SendEnvelopeRequest = {
   expiresInDays?: unknown;
   reminderIntervalDays?: unknown;
   signatureLevel?: unknown;
+  delivery?: unknown;
   permittedUseConfirmed?: boolean;
 };
 
@@ -72,6 +73,7 @@ export async function POST(
   const options = sendEnvelopeOptionsSchema.safeParse({
     expiresInDays: body.expiresInDays ?? undefined,
     reminderIntervalDays: body.reminderIntervalDays ?? undefined,
+    delivery: body.delivery ?? undefined,
     signatureLevel: body.signatureLevel ?? undefined,
   });
 
@@ -79,7 +81,7 @@ export async function POST(
     return NextResponse.json(
       {
         error:
-          "Choose a deadline between 1 and 365 days from now, reminders between 1 and 30 days apart, and a signature type this install offers.",
+          "Choose a deadline between 1 and 365 days from now, reminders between 1 and 30 days apart, a signature type this install offers, and a delivery of email or link.",
       },
       { status: 400 },
     );
@@ -90,6 +92,7 @@ export async function POST(
       session.user.id,
       id,
       {
+        delivery: options.data.delivery,
         expiresInDays: options.data.expiresInDays,
         reminderIntervalDays: options.data.reminderIntervalDays,
         signatureLevel: options.data.signatureLevel,

@@ -74,6 +74,11 @@ test("the OpenAPI description allows the values the API accepts", () => {
     [...signatureMeanings],
   );
   assert.deepEqual(fromTemplate.signatureMeaning.enum, [...signatureMeanings]);
+  assert.ok(
+    document.components.schemas.SendOptions.properties.delivery.enum.includes(
+      "link",
+    ),
+  );
 });
 
 test("the OpenAPI description gives this install's signer limit", () => {

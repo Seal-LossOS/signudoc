@@ -5,12 +5,14 @@ import {
 import { isAdminUser } from "@/lib/auth/admin";
 import { getAuthSession } from "@/lib/auth/server";
 import { getDb } from "@/lib/db/connection";
+import { readEnvelopeDelivery } from "@/lib/delivery";
 import {
   formatEnvelopeOwner,
   resolveEnvelopeViewerAccess,
 } from "@/lib/envelope-access";
 import { getScheduledEnvelopeDeletion } from "@/lib/envelope-deletion";
 import { getEnvelopeDetailDataForUser } from "@/lib/envelopes";
+import { isEmailOff } from "@/lib/services/email";
 
 const deletionDateFormatter = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
@@ -37,6 +39,7 @@ export default async function EnvelopeDetailPage({
   let ownerLabel: string | undefined;
   let ownerListView: "all" | "team" = "all";
   let scheduledDeletion: EnvelopeDeletionNotice | undefined;
+  let signingLinks = false;
 
   try {
     const session = await getAuthSession();
@@ -59,6 +62,17 @@ export default async function EnvelopeDetailPage({
     // Back to everyone's envelopes for an administrator, to the team's
     // for a teammate.
     ownerListView = canDeleteFinished ? "all" : "team";
+
+    // The sender copies each signer's link: always on a link envelope, and
+    // on an emailed one while email is off, so its next signer is not
+    // stranded (signing-link-copy.ts allows the same).
+    const delivery =
+      detailRecord && access?.viewerIsOwner
+        ? await readEnvelopeDelivery(id, getDb())
+        : null;
+
+    signingLinks =
+      delivery === "link" || (delivery === "email" && isEmailOff());
 
     const scheduled = detailRecord
       ? await getScheduledEnvelopeDeletion(id, getDb())
@@ -88,6 +102,7 @@ export default async function EnvelopeDetailPage({
       ownerListView={ownerListView}
       record={detailRecord ?? undefined}
       scheduledDeletion={scheduledDeletion}
+      signingLinks={signingLinks}
     />
   );
 }

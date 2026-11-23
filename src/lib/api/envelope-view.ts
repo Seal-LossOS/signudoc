@@ -47,8 +47,8 @@ export type ApiEnvelope = {
   copyRecipients: Array<{ email: string; id: string; name: string }>;
   createdAt: string;
   declinedAt: string | null;
-  /** "email", or "embedded" when signers sign inside the calling app. */
-  delivery: "email" | "embedded";
+  /** "email", or "embedded" when signers sign inside the calling app, or "link" when the sender delivers each signer's link. */
+  delivery: "email" | "embedded" | "link";
   expired: boolean;
   expiresAt: string | null;
   files: { certificate: string | null; signed: string | null };
@@ -72,7 +72,7 @@ export function isoTime(seconds: number | null | undefined): string | null {
 
 type EnvelopeRow = {
   apiMetadata: Record<string, unknown> | null;
-  delivery: "email" | "embedded";
+  delivery: "email" | "embedded" | "link";
   completedAt: number | null;
   createdAt: number;
   declinedAt: number | null;

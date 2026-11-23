@@ -68,7 +68,7 @@ const metadataSchema = z
   );
 
 export const apiSendOptionsSchema = z.object({
-  delivery: z.enum(["email", "embedded"]).optional(),
+  delivery: z.enum(["email", "embedded", "link"]).optional(),
   expiresInDays: deadlineDaysSchema.optional(),
   permittedUseConfirmed: z.literal(true, {
     message:

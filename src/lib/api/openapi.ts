@@ -187,7 +187,7 @@ export function buildOpenApiDocument(
             },
             createdAt: { format: "date-time", type: "string" },
             declinedAt: isoTime,
-            delivery: { enum: ["email", "embedded"], type: "string" },
+            delivery: { enum: ["email", "embedded", "link"], type: "string" },
             expired: { type: "boolean" },
             expiresAt: isoTime,
             files: {
@@ -278,10 +278,9 @@ export function buildOpenApiDocument(
         SendOptions: {
           properties: {
             delivery: {
-              default: "email",
               description:
-                "embedded: signers sign inside your app (see POST /envelopes/{id}/signers/{signerId}/embed-link), and no invitations or reminders are emailed. It needs a site on the install's list of allowed sites, simple signatures (signatureLevel simple), no signer accessCode or requireEmailCode, and an install that is not in Part 11 mode; otherwise the send is refused with 400.",
-              enum: ["email", "embedded"],
+                "embedded: signers sign inside your app (see POST /envelopes/{id}/signers/{signerId}/embed-link), and no invitations or reminders are emailed. It needs a site on the install's list of allowed sites, simple signatures (signatureLevel simple), no signer accessCode or requireEmailCode, and an install that is not in Part 11 mode; otherwise the send is refused with 400. link: no invitations or reminders are emailed; get each signer's link with POST /envelopes/{id}/signers/{signerId}/link and deliver it yourself. Unset uses the install's default, which is link when the install sends no email.",
+              enum: ["email", "embedded", "link"],
               type: "string",
             },
             expiresInDays: { maximum: 365, minimum: 1, type: "integer" },
@@ -691,6 +690,46 @@ export function buildOpenApiDocument(
           },
           summary:
             "Get a signing link to show in a frame, for a signer whose turn it is",
+        },
+      },
+      "/envelopes/{id}/signers/{signerId}/link": {
+        post: {
+          parameters: [
+            idParameter,
+            {
+              in: "path",
+              name: "signerId",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              in: "query",
+              name: "replace",
+              schema: { type: "boolean" },
+            },
+          ],
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: {
+                    properties: {
+                      expiresAt: { format: "date-time", type: "string" },
+                      object: { const: "signing_link", type: "string" },
+                      url: { format: "uri", type: "string" },
+                    },
+                    required: ["object", "url", "expiresAt"],
+                    type: "object",
+                  },
+                },
+              },
+              description:
+                "The signer's signing link, the same on every call until replaced (replace=true kills the previous one at once).",
+            },
+            ...errors,
+          },
+          summary:
+            "Get or replace a signer's link, for an envelope sent with link delivery",
         },
       },
       "/envelopes/{id}/void": {

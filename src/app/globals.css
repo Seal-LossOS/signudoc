@@ -463,3 +463,11 @@
 html[data-sunday-framed] [data-hide-when-framed] {
   display: none;
 }
+
+/* Framed by Sunday, nothing blurs what is behind it: a full-page backdrop
+   blur animating inside the frame froze the whole Chrome window (R-1119 in
+   Sunday's docs/risks). The tints stay; only the blur goes. */
+html[data-sunday-framed] * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}

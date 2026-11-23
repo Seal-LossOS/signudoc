@@ -156,7 +156,7 @@ Set `EMAIL_DRIVER=postmark` with `POSTMARK_TOKEN` (a server token) and `POSTMARK
 
 ### Link delivery
 
-A send with `delivery: "link"` emails no invitation. The sender copies each signer's link from the envelope page with Copy link and sends it to them. New link replaces the signer's link, and the old one stops working; until then the link stays the same. The certificate records the signer's identity as possession of a link the sender delivered, not of an email, and logs each copy and replacement without the link itself. `DEFAULT_SIGNING_DELIVERY=link` makes a send that names no delivery a link send; unset, the default is email, or link while email is off.
+A send with `delivery: "link"` emails no invitation. The sender copies each signer's link from the envelope page with Copy link and sends it to them. New link replaces the signer's link, and the old one stops working; until then the link stays the same. The certificate records the signer's identity as possession of a link the sender delivered, not of an email, and logs each copy and replacement without the link itself. While email can send, the send screen lets the sender pick email or link for each envelope. `DEFAULT_SIGNING_DELIVERY=link` makes a send that names no delivery a link send and starts that choice on link; unset, the default is email, or link while email is off (the screen then offers link only).
 
 ### Inside a portal
 

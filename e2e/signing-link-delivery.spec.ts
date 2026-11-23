@@ -86,17 +86,12 @@ test("a sender copies a signer's link, the same one twice, and the signer signs 
     await page.getByRole("button", { name: "Next →" }).click();
     await expect(page).toHaveURL(/\/review$/);
 
-    // The test server emails (capture driver) and names no default
-    // delivery, so its send screen sends by email. An install that sends by
-    // link (DEFAULT_SIGNING_DELIVERY=link, or email off) names link in the
-    // same request; the test names it the same way.
-    await page.route("**/api/envelopes/*/send", async (route) => {
-      const body = route.request().postDataJSON() as Record<string, unknown>;
+    // The test server emails (capture driver), so the screen starts on
+    // email and offers link delivery as the sender's choice.
+    const howTheyGetIt = page.getByLabel("How signers get their link");
 
-      await route.continue({
-        postData: JSON.stringify({ ...body, delivery: "link" }),
-      });
-    });
+    await expect(howTheyGetIt).toHaveValue("email");
+    await howTheyGetIt.selectOption("link");
     await page.getByRole("button", { name: "Send envelope" }).click();
 
     const confirmation = page.getByRole("dialog", {
@@ -106,7 +101,6 @@ test("a sender copies a signer's link, the same one twice, and the signer signs 
     await confirmation.getByRole("checkbox").check();
     await confirmation.getByRole("button", { name: "Send now" }).click();
     await expect(page).toHaveURL(/\/envelopes\/[^/]+$/);
-    await page.unroute("**/api/envelopes/*/send");
     envelopeUrl = page.url();
   });
 

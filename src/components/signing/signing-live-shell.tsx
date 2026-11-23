@@ -54,6 +54,7 @@ import {
   NUMBER_ENTRY_MESSAGE,
 } from "@/lib/field-choices";
 import { getInitials } from "@/lib/initials";
+import { containRect, inkBounds } from "@/lib/signature-ink";
 import { truncateToWholeCharacters } from "@/lib/text-truncate";
 import { postToEmbedParent } from "./embed-parent-message";
 
@@ -1809,19 +1810,23 @@ function CurrentSignerField({
     );
   }
 
-  // Filled in for the signer: the day they sign, or their name.
+  // Filled in for the signer: the day they sign, or their name. Shown at
+  // any size, shrunk to the box: an empty box looked like one to type in.
   if (field.type === "date" || field.type === "name") {
     return (
       <div
-        className="absolute z-2 overflow-hidden rounded-[0.375rem] border border-(--border-strong) bg-white/92 text-sm text-(--fg)"
+        className="absolute z-2 overflow-hidden rounded-[0.375rem] border border-(--border-strong) bg-white/92 text-sm text-(--fg) [container-type:size]"
         data-signing-field="true"
         style={frame}
+        title={
+          field.type === "date"
+            ? "Filled in with the date you sign"
+            : "Filled in with your name"
+        }
       >
-        {showInlineValue ? (
-          <p className="flex h-full items-center truncate px-2 text-[12px] font-semibold">
-            {field.type === "date" ? localDateLabel : signerName}
-          </p>
-        ) : null}
+        <p className="flex h-full items-center truncate px-2 [font-size:min(12px,75cqh)] font-semibold">
+          {field.type === "date" ? localDateLabel : signerName}
+        </p>
       </div>
     );
   }
@@ -2261,6 +2266,47 @@ function SignatureModal({
   );
 }
 
+/** The pad cropped to its ink, as a PNG data URL; null when it is blank. */
+function cropToInk(canvas: HTMLCanvasElement): string | null {
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  const ratio = canvas.width / Math.max(canvas.offsetWidth, 1);
+  const bounds = inkBounds(
+    context.getImageData(0, 0, canvas.width, canvas.height).data,
+    canvas.width,
+    canvas.height,
+    Math.ceil(4 * ratio),
+  );
+
+  if (!bounds) {
+    return null;
+  }
+
+  const cropped = document.createElement("canvas");
+
+  cropped.width = bounds.width;
+  cropped.height = bounds.height;
+  cropped
+    .getContext("2d")
+    ?.drawImage(
+      canvas,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+      0,
+      0,
+      bounds.width,
+      bounds.height,
+    );
+
+  return cropped.toDataURL("image/png");
+}
+
 function SignatureDrawCanvas({
   emptyMessage,
   initialDataUrl,
@@ -2298,8 +2344,21 @@ function SignatureDrawCanvas({
 
       const image = new window.Image();
 
+      // Back at its drawn size, centred, and shrunk only if it does not fit:
+      // a saved signature is cropped to its ink, so stretching it to the pad
+      // would enlarge it.
       image.onload = () => {
-        context.drawImage(image, 0, 0, canvas.clientWidth, canvas.clientHeight);
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        const box = containRect(
+          image.naturalWidth,
+          image.naturalHeight,
+          Math.min(canvas.clientWidth, image.naturalWidth / ratio),
+          Math.min(canvas.clientHeight, image.naturalHeight / ratio),
+        );
+
+        box.x = (canvas.clientWidth - box.width) / 2;
+        box.y = (canvas.clientHeight - box.height) / 2;
+        context.drawImage(image, box.x, box.y, box.width, box.height);
       };
       image.src = storedDataUrlRef.current;
     };
@@ -2360,11 +2419,9 @@ function SignatureDrawCanvas({
       return;
     }
 
-    const dataUrl = canvas.toDataURL("image/png");
-
-    storedDataUrlRef.current = dataUrl;
+    storedDataUrlRef.current = canvas.toDataURL("image/png");
     setHasSignature(true);
-    onChange(dataUrl);
+    onChange(cropToInk(canvas) ?? storedDataUrlRef.current);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {

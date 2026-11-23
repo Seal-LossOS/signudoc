@@ -32,9 +32,9 @@ const defaultSendErrorMessage = "Failed to send. Please try again.";
 
 type ReviewShellProps = {
   /**
-   * The install's delivery for a send from this screen. With "link" the
-   * sender copies each signer's link from the envelope page; this screen
-   * offers no emailed invitations then.
+   * The install's delivery, which this screen starts on. The sender may
+   * pick the other while email can send; with "link" they copy each
+   * signer's link from the envelope page and nobody is emailed.
    */
   delivery?: "email" | "link";
   /** False while the install sends no email at all. */
@@ -103,7 +103,7 @@ function buildSuccessMessage(
 }
 
 export function ReviewShell({
-  delivery = "email",
+  delivery: installDelivery = "email",
   emailAvailable = true,
   envelopeId,
   initialState,
@@ -117,6 +117,9 @@ export function ReviewShell({
   );
   const [signatureLevel, setSignatureLevel] =
     useState<SignatureLevel>("simple");
+  const [delivery, setDelivery] = useState<"email" | "link">(
+    emailAvailable ? installDelivery : "link",
+  );
   const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
@@ -167,9 +170,9 @@ export function ReviewShell({
           permittedUseConfirmed: true,
           reminderIntervalDays: reminderDays,
           ...(record?.signingProvider ? { signatureLevel } : {}),
-          // Named, so a change to the install's email between this page and
-          // the send cannot email the signers this screen said it would not.
-          ...(delivery === "link" ? { delivery } : {}),
+          // Always named: the send does what this screen said, whatever the
+          // install's default or email became since it loaded.
+          delivery,
         }),
         headers: {
           "content-type": "application/json",
@@ -427,6 +430,28 @@ export function ReviewShell({
 
             <div className="well mt-4 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
+                {emailAvailable ? (
+                  <label className="grid gap-1.5 sm:col-span-2">
+                    <span className="text-[0.8125rem] font-semibold text-(--secondary)">
+                      How signers get their link
+                    </span>
+                    <select
+                      className="field-input"
+                      disabled={sendPhase === "sending" || Boolean(notice)}
+                      onChange={(event) =>
+                        setDelivery(
+                          event.target.value === "link" ? "link" : "email",
+                        )
+                      }
+                      value={delivery}
+                    >
+                      <option value="email">SignuDoc emails each signer</option>
+                      <option value="link">
+                        I copy each link and send it myself
+                      </option>
+                    </select>
+                  </label>
+                ) : null}
                 <label className="grid gap-1.5">
                   <span className="text-[0.8125rem] font-semibold text-(--secondary)">
                     Signing deadline

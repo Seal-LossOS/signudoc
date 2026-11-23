@@ -6,7 +6,11 @@ import {
   getAddressDomain,
   isResendTestSender,
 } from "./services/email-addresses.ts";
-import { resolveEmailDriver } from "./services/email.ts";
+import {
+  isEmailOff,
+  missingPostmarkSettings,
+  resolveEmailDriver,
+} from "./services/email.ts";
 import {
   getSettings,
   markEmailReady,
@@ -38,6 +42,13 @@ export type EmailDnsRecord = {
 export type EmailStatus =
   /** Development: messages are written to disk, not sent. */
   | { state: "capture" }
+  /**
+   * Nothing is emailed on purpose: EMAIL_DRIVER=off (missing is empty), or
+   * Postmark with the variables in missing still unset.
+   */
+  | { state: "off"; missing: string[] }
+  /** Sent through Postmark, which checks the sender itself; From as sent. */
+  | { state: "postmark"; senderAddress: string }
   /**
    * No Resend API key, so nothing can be sent. On Vercel the steps to fix it
    * are Vercel's, which the page spells out.
@@ -207,6 +218,16 @@ async function callResend<T extends ResendResult>(
   );
 
   return call();
+}
+
+// Never throws: an unknown driver is reported by the paths that build the
+// email service, as before.
+function isPostmarkDriver(env: EnvSource): boolean {
+  try {
+    return resolveEmailDriver(env) === "postmark";
+  } catch {
+    return false;
+  }
 }
 
 type Inspection = {
@@ -379,6 +400,35 @@ async function inspectEmail({
   settings,
 }: EmailStatusOptions): Promise<Inspection> {
   const noop = async () => undefined;
+
+  // Off and Postmark are settled by the environment alone. Resend's domain
+  // checks say nothing about them, so no Resend client is asked, even one
+  // that was handed in.
+  if (isEmailOff(env) || isPostmarkDriver(env)) {
+    const resolvedSettings = settings ?? (await getSettings(env));
+    const markReady =
+      recordReady ??
+      ((ready: boolean) => defaultRecordReady(ready, resolvedSettings));
+    const off = isEmailOff(env);
+
+    await markReady(!off);
+
+    return {
+      client: null,
+      domainId: null,
+      markReady,
+      status: off
+        ? { missing: missingPostmarkSettings(env), state: "off" }
+        : {
+            // The From that resolveEmailAddresses builds under Postmark.
+            senderAddress: buildEmailAddresses({
+              ...resolvedSettings,
+              senderAddress: readEnv(env, "POSTMARK_FROM_EMAIL") ?? null,
+            }).senderAddress,
+            state: "postmark",
+          },
+    };
+  }
 
   if (!domainsClient && resolveEmailDriver(env) === "capture") {
     return {
@@ -556,8 +606,16 @@ export function emailNeedsAttention(
   settings: ResolvedSettings,
   env: EnvSource = process.env,
 ): boolean {
+  // Off on purpose needs nothing; Postmark with a variable missing does.
+  if (isEmailOff(env)) {
+    return missingPostmarkSettings(env).length > 0;
+  }
+
   try {
-    if (resolveEmailDriver(env) === "capture") {
+    const driver = resolveEmailDriver(env);
+
+    // Postmark verifies the sender itself, so there is no domain to set up.
+    if (driver === "capture" || driver === "postmark") {
       return false;
     }
   } catch {

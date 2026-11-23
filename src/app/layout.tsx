@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { Suspense } from "react";
 
+import { SundayFrameMessages } from "@/components/layout/sunday-frame-messages";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { readAppFrameOrigin } from "@/lib/embed-origin";
 
 import "./globals.css";
 
@@ -26,9 +29,17 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const frameOrigin = readAppFrameOrigin();
+
   return (
     <html lang="en">
       <body className={`${plusJakartaSans.variable} antialiased`}>
+        {/* Read per request on the dynamic pages Sunday frames; a page prerendered at build posts nothing (R-m in Sunday's docs/risks). */}
+        {frameOrigin ? (
+          <Suspense fallback={null}>
+            <SundayFrameMessages frameOrigin={frameOrigin} />
+          </Suspense>
+        ) : null}
         <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>

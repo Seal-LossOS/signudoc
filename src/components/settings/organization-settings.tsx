@@ -706,10 +706,12 @@ function EmailSetupPanel() {
   }
 
   const summary = status ? describeEmailStatus(status) : null;
+  // Not while email is off: the test would only be refused.
   const canSendTest =
     status !== null &&
     status.state !== "missing_key" &&
-    status.state !== "capture";
+    status.state !== "capture" &&
+    status.state !== "off";
 
   return (
     <div className="space-y-5 border-t border-(--border) pt-8" id="email-setup">
@@ -844,6 +846,28 @@ function describeEmailStatus(status: EmailStatus): {
         ],
         ready: true,
         title: "Emails are being captured, not sent",
+      };
+    case "off":
+      return status.missing.length === 0
+        ? {
+            lines: [
+              "Email is off on this install. Nothing is emailed; signers get their links from the sender.",
+            ],
+            ready: false,
+            title: "Email is off",
+          }
+        : {
+            lines: [
+              `Email is not set up yet. Set ${status.missing.join(", ")} on the server.`,
+            ],
+            ready: false,
+            title: "Email is not set up yet",
+          };
+    case "postmark":
+      return {
+        lines: [`Email is sent through Postmark from ${status.senderAddress}.`],
+        ready: true,
+        title: "Email goes through Postmark",
       };
     case "missing_key":
       return status.onVercel

@@ -560,6 +560,83 @@ test("the administrator is told about email until it has been seen working", () 
   );
 });
 
+const POSTMARK_ENV = {
+  EMAIL_DRIVER: "postmark",
+  POSTMARK_FROM_EMAIL: "sign@acme.com",
+  POSTMARK_TOKEN: "pm-test-token",
+};
+
+test("email turned off is reported as off, and email is not marked working", async () => {
+  const resend = fakeResend();
+
+  assert.deepEqual(
+    await getEmailStatus({ ...resend.options, env: { EMAIL_DRIVER: "off" } }),
+    { missing: [], state: "off" },
+  );
+  // A Resend client that was handed in is not asked either.
+  assert.deepEqual(resend.calls, []);
+  assert.deepEqual(resend.readyMarks, [false]);
+});
+
+test("Postmark with a variable missing is off, and names what is missing", async () => {
+  const resend = fakeResend();
+
+  assert.deepEqual(
+    await getEmailStatus({
+      ...resend.options,
+      env: { EMAIL_DRIVER: "postmark", POSTMARK_TOKEN: "pm-test-token" },
+    }),
+    { missing: ["POSTMARK_FROM_EMAIL"], state: "off" },
+  );
+  assert.deepEqual(resend.calls, []);
+  assert.deepEqual(resend.readyMarks, [false]);
+});
+
+test("Postmark set up in full is reported with the From it sends, and marked working", async () => {
+  const resend = fakeResend();
+
+  assert.deepEqual(
+    await getEmailStatus({ ...resend.options, env: POSTMARK_ENV }),
+    { senderAddress: "Acme Corp <sign@acme.com>", state: "postmark" },
+  );
+  assert.deepEqual(resend.calls, []);
+  assert.deepEqual(resend.readyMarks, [true]);
+});
+
+test("setting up or checking a domain while email is off changes nothing at Resend", async () => {
+  // A sender whose domain Resend has not heard of: under Resend this would
+  // create it.
+  const resend = fakeResend();
+  const options = { ...resend.options, env: { EMAIL_DRIVER: "off" } };
+
+  assert.deepEqual(await addEmailDomain(options), {
+    missing: [],
+    state: "off",
+  });
+  assert.deepEqual(await recheckEmailDomain(options), {
+    missing: [],
+    state: "off",
+  });
+  assert.deepEqual(
+    await addEmailDomain({ ...resend.options, env: POSTMARK_ENV }),
+    { senderAddress: "Acme Corp <sign@acme.com>", state: "postmark" },
+  );
+  assert.deepEqual(resend.calls, []);
+});
+
+test("the administrator is told about email off only when Postmark still needs a variable", () => {
+  assert.equal(emailNeedsAttention(settings, { EMAIL_DRIVER: "off" }), false);
+  assert.equal(
+    emailNeedsAttention(settings, {
+      EMAIL_DRIVER: "postmark",
+      POSTMARK_FROM_EMAIL: "sign@acme.com",
+    }),
+    true,
+  );
+  // Never seen working (emailReadyAt is null), and still nothing to do.
+  assert.equal(emailNeedsAttention(settings, POSTMARK_ENV), false);
+});
+
 test("RESEND_REGION picks a known Resend region and ignores anything else", () => {
   assert.deepEqual(resendRegionOption({ RESEND_REGION: "EU-WEST-1" }), {
     region: "eu-west-1",

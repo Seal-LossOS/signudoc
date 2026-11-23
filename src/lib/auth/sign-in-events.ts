@@ -62,10 +62,12 @@ const SESSION_FIRST_EVENTS: Record<string, SystemAuditEventType> = {
 };
 
 // Paths that do not act on the caller's session, so a stale one does not
-// stand in their way: signing in again, or reading the session (the app's
-// own session check in auth/server.ts applies the limits to that).
+// stand in their way: signing in again, or arriving from Sunday, or reading
+// the session (the app's own session check in auth/server.ts applies the
+// limits to that).
 function skipsSessionLimits(path: string): boolean {
   return (
+    path === "/sunday/enter" ||
     path === "/get-session" ||
     path === "/sign-out" ||
     path === "/ok" ||

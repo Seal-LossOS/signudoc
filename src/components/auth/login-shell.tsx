@@ -10,6 +10,7 @@ import {
   SsoButton,
   type SsoOption,
 } from "@/components/auth/sso-button";
+import { Button } from "@/components/ui/button";
 import { FieldShell, ShellButton } from "@/components/shared/form-shell";
 import { authClient } from "@/lib/auth/client";
 import {
@@ -56,6 +57,8 @@ type LoginShellProps = {
   sso?: SsoOption | null;
   /** The ?error= single sign-on came back with. */
   ssoError?: string | null;
+  /** Sunday's address, when the install signs people in from Sunday. */
+  sundayOrigin?: string | null;
 };
 
 type ForgotPasswordModel = {
@@ -127,6 +130,7 @@ function LiveLoginShell({
   resetToken = null,
   sso = null,
   ssoError = null,
+  sundayOrigin = null,
 }: LoginShellProps) {
   const router = useRouter();
   const { signupAvailable } = useBranding();
@@ -417,6 +421,24 @@ function LiveLoginShell({
             <p className="notice notice-danger" role="alert">
               {bannerMessage}
             </p>
+          ) : null}
+
+          {sundayOrigin ? (
+            <div className="space-y-3">
+              <p className="text-sm text-(--secondary)">
+                This install signs you in from Sunday.
+              </p>
+              {/* ShellButton's link cannot target the top window, which a page shown inside Sunday's frame needs. */}
+              <Button
+                asChild
+                className="min-h-12 w-full px-5.5 text-[0.9375rem]"
+                variant="default"
+              >
+                <a href={sundayOrigin} rel="noopener" target="_top">
+                  Open Signatures from Sunday
+                </a>
+              </Button>
+            </div>
           ) : null}
 
           {sso ? (

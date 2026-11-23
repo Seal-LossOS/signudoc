@@ -120,6 +120,7 @@ export function AppShell({
                   event.preventDefault();
                   void handleSignOut();
                 }}
+                data-hide-when-framed=""
                 variant="destructive"
               >
                 {isSigningOut ? "Signing out..." : "Sign out"}

@@ -42,6 +42,32 @@ test("the issuer may be given with its discovery path or a trailing slash", () =
   assert.equal(readSsoConfig({ ...sso, SSO_NAME: "Okta" })?.name, "Okta");
 });
 
+test("password sign-in can be turned off with the Sunday bridge and no single sign-on", () => {
+  const bridge = {
+    SUNDAY_BRIDGE_SECRET: "sunday-bridge-test-secret-0123456789abcdef",
+    SUNDAY_ORIGIN: "https://sunday.example.test",
+    SUNDAY_WORKSPACE_ID: "ws_test_0001",
+  };
+
+  assert.equal(
+    readPasswordSignInPolicy({ ...bridge, PASSWORD_SIGN_IN: "off" }).enabled,
+    false,
+  );
+  // A bridge that is only half set up is off, so it keeps nobody out.
+  assert.equal(
+    readPasswordSignInPolicy({
+      ...bridge,
+      PASSWORD_SIGN_IN: "off",
+      SUNDAY_WORKSPACE_ID: "",
+    }).enabled,
+    true,
+  );
+  assert.equal(
+    readPasswordSignInPolicy({ PASSWORD_SIGN_IN: "off" }).enabled,
+    true,
+  );
+});
+
 test("password sign-in can only be turned off while single sign-on is set up", () => {
   assert.equal(
     readPasswordSignInPolicy({ PASSWORD_SIGN_IN: "off" }).enabled,

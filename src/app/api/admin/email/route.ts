@@ -9,6 +9,7 @@ import {
 } from "@/lib/email-status";
 import { sendTestEmail } from "@/lib/email-test";
 import { recordAdminActivity } from "@/lib/services/admin-activity";
+import { isEmailOff } from "@/lib/services/email";
 import { logRouteError } from "@/lib/security/logging";
 import {
   applyRateLimit,
@@ -86,9 +87,10 @@ export async function POST(request: Request) {
         to: session.user.email,
       });
 
+      // Email off is a setting, not a provider failing, so it is not a 502.
       return NextResponse.json(
         { status: await getEmailStatus(), test: result },
-        { status: result.sent ? 200 : 502 },
+        { status: result.sent ? 200 : isEmailOff() ? 409 : 502 },
       );
     }
 

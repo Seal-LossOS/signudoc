@@ -134,6 +134,15 @@ export async function submitPublicContactMessage(
       to: supportAddress,
     });
 
+    // Not accepted (email is off): the message is lost, so the visitor must
+    // not be told it was sent.
+    if (deliveryResult.accepted.length === 0) {
+      throw new ContactSubmissionError(
+        "Contact form is temporarily unavailable.",
+        503,
+      );
+    }
+
     return {
       ignored: false,
       messageId: deliveryResult.messageId,

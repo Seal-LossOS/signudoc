@@ -12,6 +12,7 @@ import {
   withTransaction,
 } from "../db/connection.ts";
 import { logAuditRecord } from "../security/logging.ts";
+import { OFF_MESSAGE_ID_PREFIX } from "./email.ts";
 import { canonicalJson } from "../utils/canonical-json.ts";
 import { enqueueWebhookDeliveries } from "../webhooks/outbox.ts";
 
@@ -370,6 +371,11 @@ export async function recordEmailSent(
   },
   database: DbExecutor = getDb(),
 ): Promise<void> {
+  // The off driver sent nothing, and the trail must not say it was accepted.
+  if (input.messageId?.startsWith(OFF_MESSAGE_ID_PREFIX)) {
+    return;
+  }
+
   try {
     await recordAuditEvent(
       {

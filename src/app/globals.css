@@ -458,3 +458,8 @@
     background-size: 22px 22px;
   }
 }
+
+/* Sunday signs people out; inside its frame SignuDoc's own Sign out would only sign straight back in. */
+html[data-sunday-framed] [data-hide-when-framed] {
+  display: none;
+}

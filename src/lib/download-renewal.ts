@@ -1,5 +1,6 @@
 import { type DbExecutor, getDb } from "./db/connection.ts";
 import {
+  DownloadAccessError,
   renewRecipientDownloadLinks,
   type RenewedDownloadLinks,
 } from "./downloads.ts";
@@ -54,6 +55,15 @@ export async function sendFreshDownloadLinks(
         textBody: body.textBody,
         to: signer.email,
       });
+
+      // Not accepted (email is off): thrown, so the old links are put back
+      // instead of being replaced by links nobody receives.
+      if (delivery.accepted.length === 0) {
+        throw new DownloadAccessError(
+          "New links can't be emailed from this site. Ask the sender for a copy of the documents.",
+          503,
+        );
+      }
 
       await recordEmailSent(
         {

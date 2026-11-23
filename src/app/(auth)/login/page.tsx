@@ -1,6 +1,7 @@
 import { LoginShell } from "@/components/auth/login-shell";
 import { redirectIfSignedIn } from "@/lib/auth/server";
 import { readPasswordSignInPolicy, readSsoConfig } from "@/lib/auth/sso";
+import { readSundayBridgeConfig } from "@/lib/auth/sunday-token";
 
 type LoginPageProps = {
   searchParams?: Promise<{
@@ -34,6 +35,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       resetError={error === "INVALID_TOKEN" ? error : null}
       resetToken={resolvedSearchParams?.token ?? null}
       sso={sso ? { name: sso.name } : null}
+      sundayOrigin={readSundayBridgeConfig()?.sundayOrigin ?? null}
       // Anything else is single sign-on coming back without a session.
       ssoError={error && error !== "INVALID_TOKEN" ? error.slice(0, 80) : null}
     />

@@ -1,4 +1,5 @@
 import { readEnv, type EnvSource } from "../utils/env.ts";
+import { readSundayBridgeConfig } from "./sunday-token.ts";
 
 // Single sign-on with the organization's own identity provider, over OpenID
 // Connect: Okta, Microsoft Entra ID, Google Workspace, or any other provider
@@ -117,14 +118,15 @@ export function readSsoConfig(env: EnvSource = process.env): SsoConfig | null {
 
 /**
  * Whether password sign-in is on. It can only be turned off while single
- * sign-on is set up, so nobody can be left with no way in at all.
+ * sign-on or the Sunday bridge is set up, so nobody can be left with no way
+ * in at all.
  */
 export function readPasswordSignInPolicy(
   env: EnvSource = process.env,
 ): PasswordSignInPolicy {
   const off =
     readEnv(env, "PASSWORD_SIGN_IN")?.toLowerCase() === "off" &&
-    readSsoConfig(env) !== null;
+    (readSsoConfig(env) !== null || readSundayBridgeConfig(env) !== null);
 
   return {
     allowedEmails: off

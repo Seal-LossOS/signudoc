@@ -41,6 +41,12 @@ import {
 import { escapeHtml } from "../utils/html.ts";
 import { isRunningSetup } from "./setup-context.ts";
 import { signInEvents } from "./sign-in-events.ts";
+import { sundayBridge } from "./sunday-bridge.ts";
+import { isRunningSundayBridge } from "./sunday-bridge-context.ts";
+import {
+  missingSundayBridgeSettings,
+  readSundayBridgeConfig,
+} from "./sunday-token.ts";
 import {
   isSsoEmailVerified,
   mayUsePassword,
@@ -270,6 +276,17 @@ const PASSWORD_PATHS = new Set([
   "/sign-up/email",
 ]);
 
+let warnedSundayBridgeOff = false;
+
+// Once per process: the auth server is built for each test and each request
+// path that has no cached one, and the setting does not change in between.
+function warnSundayBridgeOffOnce(names: string[]) {
+  if (!warnedSundayBridgeOff) {
+    warnedSundayBridgeOff = true;
+    console.warn(`[auth] The Sunday bridge is off: set ${names.join(", ")}.`);
+  }
+}
+
 export function createAppAuth({
   database = getDb(),
   env = process.env,
@@ -295,6 +312,13 @@ export function createAppAuth({
   };
   const sso = readSsoConfig(env);
   const passwordPolicy = readPasswordSignInPolicy(env);
+  const sundayBridgeConfig = readSundayBridgeConfig(env);
+  const missingSundaySettings = missingSundayBridgeSettings(env);
+
+  if (missingSundaySettings.length > 0) {
+    warnSundayBridgeOffOnce(missingSundaySettings);
+  }
+
   const plugins = [
     // Single sign-on with the organization's identity provider (sso.ts).
     // Its sign-ins do not ask for this app's second step: the provider's
@@ -347,6 +371,11 @@ export function createAppAuth({
       backupCodeOptions: { amount: 10, length: 10 },
       skipVerificationOnEnable: false,
     }),
+    // Sign-in handed over from Sunday (sunday-bridge.ts). Sunday's own
+    // sign-in is the check, as an identity provider's is for single sign-on.
+    ...(sundayBridgeConfig
+      ? [sundayBridge(sundayBridgeConfig, { appUrl: baseURL, env })]
+      : []),
     // After the two-factor plugin: see sign-in-events.ts.
     signInEvents(),
     ...(includeNextCookies ? [nextCookies()] : []),
@@ -465,15 +494,15 @@ export function createAppAuth({
             : "";
 
         // With password sign-in turned off, only the addresses kept for
-        // when the identity provider is down may use one (sso.ts).
+        // when the identity provider or Sunday is down may use one (sso.ts).
         if (
-          sso &&
+          !passwordPolicy.enabled &&
           PASSWORD_PATHS.has(ctx.path ?? "") &&
           !mayUsePassword(passwordPolicy, email)
         ) {
           throw new APIError("FORBIDDEN", {
             code: "PASSWORD_SIGN_IN_OFF",
-            message: `Password sign-in is turned off here. Continue with ${sso.name} instead.`,
+            message: `Password sign-in is turned off here. ${sso ? `Continue with ${sso.name} instead.` : "Open Signatures from Sunday instead."}`,
           });
         }
 
@@ -543,7 +572,11 @@ export function createAppAuth({
       // the account comes to be created, so the check in hooks.before above
       // is not the only thing standing in the way.
       validateUserInfo: async ({ source, user }) => {
-        if (source.action !== "create-user" || isRunningSetup()) {
+        if (
+          source.action !== "create-user" ||
+          isRunningSetup() ||
+          isRunningSundayBridge()
+        ) {
           return;
         }
 

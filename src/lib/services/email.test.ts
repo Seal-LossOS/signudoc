@@ -7,6 +7,10 @@ import {
   canSendEmail,
   createEmailService,
   createLazyEmailService,
+  fitsAsAttachments,
+  isEmailOff,
+  missingPostmarkSettings,
+  resolveEmailDriver,
   type EmailService,
 } from "./email.ts";
 
@@ -182,4 +186,137 @@ test("signup knows when there is no email provider to send with (issue #95)", ()
     }),
     false,
   );
+});
+
+// The off and postmark drivers. Email off is defined in one place,
+// isEmailOff, and a Postmark setup missing its token or sender is off.
+
+const POSTMARK = {
+  EMAIL_DRIVER: "postmark",
+  POSTMARK_FROM_EMAIL: "sign@acme.test",
+  POSTMARK_TOKEN: "pm-test-token",
+};
+
+test("the off and postmark drivers are known, and an unknown one names all four", () => {
+  assert.equal(resolveEmailDriver({ EMAIL_DRIVER: "off" }), "off");
+  assert.equal(resolveEmailDriver({ EMAIL_DRIVER: "postmark" }), "postmark");
+  assert.equal(resolveEmailDriver({ EMAIL_DRIVER: " Postmark " }), "postmark");
+  assert.throws(
+    () => resolveEmailDriver({ EMAIL_DRIVER: "smtp" }),
+    (error: Error) =>
+      error.message.includes('"postmark"') && error.message.includes('"off"'),
+  );
+});
+
+test("the Postmark settings still unset are named in order", () => {
+  assert.deepEqual(missingPostmarkSettings({ EMAIL_DRIVER: "postmark" }), [
+    "POSTMARK_TOKEN",
+    "POSTMARK_FROM_EMAIL",
+  ]);
+  assert.deepEqual(
+    missingPostmarkSettings({
+      EMAIL_DRIVER: "postmark",
+      POSTMARK_TOKEN: "pm-test-token",
+    }),
+    ["POSTMARK_FROM_EMAIL"],
+  );
+  assert.deepEqual(missingPostmarkSettings(POSTMARK), []);
+  assert.deepEqual(missingPostmarkSettings({ EMAIL_DRIVER: "off" }), []);
+});
+
+test("email is off under the off driver and under an incomplete Postmark setup", () => {
+  assert.equal(isEmailOff({ EMAIL_DRIVER: "off" }), true);
+  assert.equal(isEmailOff({ ...POSTMARK, POSTMARK_TOKEN: undefined }), true);
+  assert.equal(
+    isEmailOff({ ...POSTMARK, POSTMARK_FROM_EMAIL: undefined }),
+    true,
+  );
+  assert.equal(isEmailOff(POSTMARK), false);
+  assert.equal(isEmailOff({ EMAIL_DRIVER: "resend" }), false);
+  assert.equal(isEmailOff({ EMAIL_DRIVER: "capture" }), false);
+  assert.equal(isEmailOff({}), false);
+  assert.equal(isEmailOff({ EMAIL_DRIVER: "smtp" }), false);
+});
+
+test("email that is off does not count as a provider to send with", () => {
+  assert.equal(
+    canSendEmail({ EMAIL_DRIVER: "off", NODE_ENV: "production" }),
+    false,
+  );
+  assert.equal(
+    canSendEmail({
+      ...POSTMARK,
+      NODE_ENV: "production",
+      POSTMARK_TOKEN: undefined,
+    }),
+    false,
+  );
+  assert.equal(canSendEmail({ ...POSTMARK, NODE_ENV: "production" }), true);
+});
+
+test("the off driver answers every message as not sent, even in production", async (t) => {
+  const info = t.mock.method(console, "info", () => {});
+  const service = createEmailService({
+    env: { EMAIL_DRIVER: "off", NODE_ENV: "production" },
+  });
+
+  const delivery = await service.send(MESSAGE);
+
+  assert.deepEqual(delivery.accepted, []);
+  assert.deepEqual(delivery.rejected, ["signer@example.test"]);
+  assert.match(delivery.messageId ?? "", /^off:/);
+  assert.equal(info.mock.callCount(), 1);
+
+  const line = String(info.mock.calls[0]?.arguments[0]);
+
+  assert.match(line, /completion_notification/);
+  assert.doesNotMatch(line, /signer@example\.test/);
+  assert.doesNotMatch(line, /Your signed copy/);
+
+  const deliveries = await service.sendBatch([
+    MESSAGE,
+    { ...MESSAGE, to: "second@example.test" },
+  ]);
+
+  assert.deepEqual(
+    deliveries.map((item) => item.rejected),
+    [["signer@example.test"], ["second@example.test"]],
+  );
+});
+
+test("Postmark's smaller size limit decides what goes as attachments", () => {
+  const eightMiB = [
+    {
+      content: new Uint8Array(8 * 1024 * 1024),
+      contentType: "application/pdf",
+      filename: "big.pdf",
+    },
+  ];
+
+  assert.equal(fitsAsAttachments(eightMiB, POSTMARK), false);
+  assert.equal(fitsAsAttachments(eightMiB, { EMAIL_DRIVER: "resend" }), true);
+  assert.equal(fitsAsAttachments(eightMiB, { EMAIL_DRIVER: "smtp" }), true);
+});
+
+test("a complete Postmark setup sends through Postmark", async () => {
+  const urls: string[] = [];
+  const service = createEmailService({
+    env: POSTMARK,
+    fetch: async (url) => {
+      urls.push(url);
+
+      return new Response(JSON.stringify({ ErrorCode: 0, MessageID: "pm-1" }), {
+        status: 200,
+      });
+    },
+    resolveAddresses: async () => ({
+      senderAddress: "Acme <sign@acme.test>",
+      supportAddress: null,
+    }),
+  });
+
+  const delivery = await service.send(MESSAGE);
+
+  assert.deepEqual(urls, ["https://api.postmarkapp.com/email"]);
+  assert.equal(delivery.messageId, "pm-1");
 });

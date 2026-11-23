@@ -6,8 +6,17 @@ import { Resend } from "resend";
 
 import { getSettings } from "../settings.ts";
 import { type EmailTemplateKind } from "../types/domain.ts";
-import { getEnv, isLocalDeployment, type EnvSource } from "../utils/env.ts";
+import {
+  getEnv,
+  isLocalDeployment,
+  readEnv,
+  type EnvSource,
+} from "../utils/env.ts";
 import { buildEmailAddresses, type EmailAddresses } from "./email-addresses.ts";
+import {
+  createPostmarkEmailService,
+  POSTMARK_MAX_ATTACHMENT_BYTES,
+} from "./email-postmark.ts";
 import { CAPTURED_MESSAGE_ID_PREFIX } from "./captured-email.ts";
 import {
   assertServiceConfig,
@@ -22,7 +31,12 @@ const EMAIL_ENV_KEYS = ["RESEND_API_KEY"] as const;
 const DEFAULT_CAPTURE_DIR = ".data/outbox";
 const DEFAULT_CAPTURE_SENDER_ADDRESS = "dev@signudoc.localhost";
 
-export type EmailDriver = "capture" | "resend";
+export type EmailDriver = "capture" | "off" | "postmark" | "resend";
+
+/** Prefix of the message id the off driver answers with; recordEmailSent writes nothing for it. */
+export const OFF_MESSAGE_ID_PREFIX = "off:";
+
+const POSTMARK_ENV_KEYS = ["POSTMARK_TOKEN", "POSTMARK_FROM_EMAIL"] as const;
 
 export type EmailAttachment = {
   content: Uint8Array;
@@ -39,10 +53,21 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export function fitsAsAttachments(
   attachments: readonly EmailAttachment[],
+  env: EnvSource = process.env,
 ): boolean {
+  let limit = MAX_ATTACHMENT_BYTES;
+
+  try {
+    if (resolveEmailDriver(env) === "postmark") {
+      limit = POSTMARK_MAX_ATTACHMENT_BYTES;
+    }
+  } catch {
+    // An unknown driver is reported where the service is built, not here.
+  }
+
   return (
     attachments.reduce((total, item) => total + item.content.byteLength, 0) <=
-    MAX_ATTACHMENT_BYTES
+    limit
   );
 }
 
@@ -69,6 +94,8 @@ export type EmailSendOptions = {
 
 type CreateEmailServiceOptions = {
   env?: EnvSource;
+  /** Replaced in tests, so that Postmark is never called. */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Replaced in tests, where there is no database to read settings from. */
   resolveAddresses?: () => Promise<EmailAddresses>;
   resendClient?: Resend;
@@ -193,13 +220,86 @@ export function resolveEmailDriver(env: EnvSource = process.env): EmailDriver {
     return "resend";
   }
 
-  if (configuredDriver === "capture" || configuredDriver === "resend") {
+  if (
+    configuredDriver === "capture" ||
+    configuredDriver === "off" ||
+    configuredDriver === "postmark" ||
+    configuredDriver === "resend"
+  ) {
     return configuredDriver;
   }
 
   throw new Error(
-    `Unknown EMAIL_DRIVER "${configuredDriver}". Use "resend" or "capture".`,
+    `Unknown EMAIL_DRIVER "${configuredDriver}". Use "resend", "postmark", "off" or "capture".`,
   );
+}
+
+/** The Postmark variables still unset, in this order: POSTMARK_TOKEN, POSTMARK_FROM_EMAIL. [] for any other driver. */
+export function missingPostmarkSettings(
+  env: EnvSource = process.env,
+): string[] {
+  try {
+    if (resolveEmailDriver(env) !== "postmark") {
+      return [];
+    }
+  } catch {
+    return [];
+  }
+
+  return POSTMARK_ENV_KEYS.filter((key) => readEnv(env, key) === undefined);
+}
+
+/**
+ * True when nothing can be emailed on purpose: EMAIL_DRIVER=off, or postmark
+ * with a setting missing. Every "email is off" rule keys on this, never on
+ * the driver's name. An unknown driver answers false: the paths that build
+ * the service report it.
+ */
+export function isEmailOff(env: EnvSource = process.env): boolean {
+  let driver: EmailDriver;
+
+  try {
+    driver = resolveEmailDriver(env);
+  } catch {
+    return false;
+  }
+
+  return (
+    driver === "off" ||
+    (driver === "postmark" && missingPostmarkSettings(env).length > 0)
+  );
+}
+
+/**
+ * Sends nothing, in any environment, and answers every message as not sent,
+ * so the flows that build a service eagerly keep working. The log line names
+ * the template only, never the address.
+ */
+function createOffEmailService(): EmailService {
+  async function skip(
+    message: TransactionalEmailMessage,
+  ): Promise<EmailDeliveryResult> {
+    console.info(`[email:off] ${message.template} not sent`);
+
+    return {
+      accepted: [],
+      messageId: `${OFF_MESSAGE_ID_PREFIX}${randomUUID()}`,
+      rejected: [message.to],
+    };
+  }
+
+  return {
+    send: (message) => skip(message),
+    async sendBatch(messages) {
+      const results: EmailDeliveryResult[] = [];
+
+      for (const message of messages) {
+        results.push(await skip(message));
+      }
+
+      return results;
+    },
+  };
 }
 
 /**
@@ -294,8 +394,17 @@ export async function resolveEmailAddresses(
   env: EnvSource = process.env,
 ): Promise<EmailAddresses> {
   const settings = await getSettings(env);
+  const driver = resolveEmailDriver(env);
 
-  return resolveEmailDriver(env) === "capture"
+  if (driver === "postmark") {
+    // Postmark sends only from its verified sender, whatever is stored.
+    return buildEmailAddresses({
+      ...settings,
+      senderAddress: readEnv(env, "POSTMARK_FROM_EMAIL") ?? null,
+    });
+  }
+
+  return driver === "capture" || driver === "off"
     ? buildEmailAddresses(settings, DEFAULT_CAPTURE_SENDER_ADDRESS)
     : buildEmailAddresses(settings);
 }
@@ -321,6 +430,11 @@ export function isEmailNotConnectedError(error: unknown): boolean {
  * not set up instead (issue #95).
  */
 export function canSendEmail(env: EnvSource = process.env): boolean {
+  // The off service builds without error, so building is not proof here.
+  if (isEmailOff(env)) {
+    return false;
+  }
+
   try {
     createEmailService({ env });
     return true;
@@ -353,12 +467,28 @@ export function createLazyEmailService(
 
 export function createEmailService({
   env = process.env,
+  fetch,
   resolveAddresses = () => resolveEmailAddresses(env),
   resendClient,
   wait = waitFor,
 }: CreateEmailServiceOptions = {}): EmailService {
+  if (!resendClient && isEmailOff(env)) {
+    return createOffEmailService();
+  }
+
   if (!resendClient && resolveEmailDriver(env) === "capture") {
     return createCaptureEmailService(env, resolveAddresses);
+  }
+
+  if (!resendClient && resolveEmailDriver(env) === "postmark") {
+    // isEmailOff above has made sure the token and the sender are set.
+    return createPostmarkEmailService({
+      fetch,
+      messageStream: readEnv(env, "POSTMARK_MESSAGE_STREAM") ?? "outbound",
+      resolveAddresses,
+      token: readEnv(env, "POSTMARK_TOKEN")!,
+      wait,
+    });
   }
 
   if (!resendClient) {

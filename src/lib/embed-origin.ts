@@ -52,20 +52,48 @@ export function parseEmbedOrigin(
 }
 
 /**
+ * The one site that may frame the app's own pages (a portal the whole
+ * app is shown inside, such as Sunday), from APP_FRAME_ORIGIN. Null when
+ * unset or not one exact origin.
+ */
+export function readAppFrameOrigin(
+  env: EnvSource = process.env,
+): string | null {
+  return parseEmbedOrigin(env.APP_FRAME_ORIGIN, env);
+}
+
+// Never framed by the portal: the signer's pages and downloads (so a
+// signature is never captured inside someone else's frame) and the API.
+const NEVER_FRAMED_PREFIXES = ["/sign/", "/download/", "/api/"] as const;
+
+function isNeverFramed(pathname: string): boolean {
+  return NEVER_FRAMED_PREFIXES.some(
+    (prefix) => pathname === prefix.slice(0, -1) || pathname.startsWith(prefix),
+  );
+}
+
+/**
  * The Content-Security-Policy frame-ancestors sources for a path: the
  * origin named in ?origin= on an embedded signing page, else none. The page
  * itself then refuses to open unless that origin is the one its link was
  * made for, and the link was made only for an origin an administrator
- * allowed. So a page shows in a frame only on an allowed site.
+ * allowed. So a page shows in a frame only on an allowed site. With
+ * APP_FRAME_ORIGIN set, the app's other pages may be framed by that one site.
  */
 export function frameAncestorsFor(
   pathname: string,
   searchParams: URLSearchParams,
   env: EnvSource = process.env,
 ): string {
-  if (!pathname.startsWith("/embed/sign/")) {
+  if (pathname.startsWith("/embed/")) {
+    return pathname.startsWith("/embed/sign/")
+      ? (parseEmbedOrigin(searchParams.get("origin"), env) ?? "'none'")
+      : "'none'";
+  }
+
+  if (isNeverFramed(pathname)) {
     return "'none'";
   }
 
-  return parseEmbedOrigin(searchParams.get("origin"), env) ?? "'none'";
+  return readAppFrameOrigin(env) ?? "'none'";
 }

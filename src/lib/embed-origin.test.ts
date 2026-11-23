@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { frameAncestorsFor, parseEmbedOrigin } from "./embed-origin.ts";
+import {
+  frameAncestorsFor,
+  parseEmbedOrigin,
+  readAppFrameOrigin,
+} from "./embed-origin.ts";
 
 test("an embed origin is one exact https site", () => {
   const env = {};
@@ -82,5 +86,83 @@ test("only an embedded signing page may be framed, and only by the site it names
   assert.equal(
     frameAncestorsFor("/embed/sign/abc", new URLSearchParams(), env),
     "'none'",
+  );
+});
+
+const portalEnv = { APP_FRAME_ORIGIN: "https://sunday.example.com" };
+
+test("with APP_FRAME_ORIGIN set, the app's own pages may be framed by that one site", () => {
+  const none = new URLSearchParams();
+
+  for (const path of [
+    "/dashboard",
+    "/envelopes/x/prepare",
+    "/settings",
+    "/login",
+    "/sunday/enter",
+  ]) {
+    assert.equal(
+      frameAncestorsFor(path, none, portalEnv),
+      "https://sunday.example.com",
+      path,
+    );
+  }
+});
+
+test("with APP_FRAME_ORIGIN set, signing pages, downloads and the API are never framed by the portal", () => {
+  const none = new URLSearchParams();
+
+  for (const path of ["/sign/x", "/sign", "/download/x", "/api/x", "/api"]) {
+    assert.equal(frameAncestorsFor(path, none, portalEnv), "'none'", path);
+  }
+});
+
+test("an embedded signing page keeps its own origin rule under APP_FRAME_ORIGIN", () => {
+  assert.equal(
+    frameAncestorsFor(
+      "/embed/sign/abc",
+      new URLSearchParams({ origin: "https://app.example.com" }),
+      portalEnv,
+    ),
+    "https://app.example.com",
+  );
+  assert.equal(
+    frameAncestorsFor("/embed/sign/abc", new URLSearchParams(), portalEnv),
+    "'none'",
+  );
+  assert.equal(
+    frameAncestorsFor("/embed/other", new URLSearchParams(), portalEnv),
+    "'none'",
+  );
+});
+
+test("an invalid APP_FRAME_ORIGIN is ignored", () => {
+  for (const value of [
+    "http://sunday.example.com",
+    "https://sunday.example.com/path",
+    "https://*.example.com",
+    "",
+  ]) {
+    assert.equal(
+      frameAncestorsFor("/dashboard", new URLSearchParams(), {
+        APP_FRAME_ORIGIN: value,
+      }),
+      "'none'",
+      value,
+    );
+  }
+});
+
+test("without APP_FRAME_ORIGIN the app's own pages are not framed", () => {
+  assert.equal(
+    frameAncestorsFor("/dashboard", new URLSearchParams(), {}),
+    "'none'",
+  );
+});
+
+test("readAppFrameOrigin returns the exact origin in lower case", () => {
+  assert.equal(
+    readAppFrameOrigin({ APP_FRAME_ORIGIN: "https://Sunday.Example.com/" }),
+    "https://sunday.example.com",
   );
 });

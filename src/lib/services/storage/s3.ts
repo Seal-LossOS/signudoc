@@ -66,12 +66,12 @@ export function readS3Config(env: EnvSource = process.env): S3Config {
 type CreateS3StorageServiceOptions = {
   env?: EnvSource;
   /** Replaced in tests. */
-  fetch?: (request: Request) => Promise<Response>;
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
 };
 
 export function createS3StorageService({
   env = process.env,
-  fetch: send = (request) => fetch(request),
+  fetch: send = (url, init) => fetch(url, init),
 }: CreateS3StorageServiceOptions = {}): StorageService {
   const config = readS3Config(env);
   const client = new AwsClient({
@@ -95,14 +95,18 @@ export function createS3StorageService({
     normalizedKey: string,
     init: { body?: Uint8Array; headers?: Record<string, string> } = {},
   ): Promise<Response> {
-    return send(
-      await client.sign(objectUrl(normalizedKey), {
-        // BodyInit refuses a Uint8Array typed over ArrayBufferLike; at runtime the bytes go out as they are.
-        body: init.body as BodyInit | undefined,
-        headers: init.headers,
-        method,
-      }),
-    );
+    // BodyInit refuses a Uint8Array typed over ArrayBufferLike; at runtime the bytes go out as they are.
+    const body = init.body as BodyInit | undefined;
+    const signed = await client.sign(objectUrl(normalizedKey), {
+      body,
+      headers: init.headers,
+      method,
+    });
+
+    // The bytes, not the signed Request, go to fetch: a Request's body is a
+    // stream, and Next.js's fetch sent it chunked with no length, which R2
+    // refuses with 411.
+    return send(signed.url, { body, headers: signed.headers, method });
   }
 
   function failure(method: string, response: Response): Error {

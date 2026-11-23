@@ -9,9 +9,11 @@ import { StorageObjectNotFoundError } from "./types.ts";
 // A fake fetch that records each signed request and answers from a queue.
 function createFakeFetch(answers: Response[]) {
   const requests: Request[] = [];
+  const bodies: unknown[] = [];
 
-  async function send(request: Request): Promise<Response> {
-    requests.push(request);
+  async function send(url: string, init: RequestInit): Promise<Response> {
+    requests.push(new Request(url, init));
+    bodies.push(init.body);
 
     const answer = answers.shift();
 
@@ -22,7 +24,7 @@ function createFakeFetch(answers: Response[]) {
     return answer;
   }
 
-  return { requests, send };
+  return { bodies, requests, send };
 }
 
 const base = {
@@ -313,4 +315,20 @@ test("the S3 driver is chosen by STORAGE_DRIVER and offers the whole service", (
   assert.equal(typeof storage.getObjectStream, "function");
   assert.equal(typeof storage.headObject, "function");
   assert.equal(typeof storage.putObject, "function");
+});
+
+test("a PUT hands fetch the bytes themselves, so the length is known", async () => {
+  // R2 refuses a PUT with no Content-Length (411). A stream body, as inside
+  // a Request, went out chunked under Next.js; bytes always carry a length.
+  const fake = createFakeFetch([new Response(null, { status: 200 })]);
+  const storage = createS3StorageService({ env: base, fetch: fake.send });
+  const body = Buffer.from("aGVsbG8=", "base64");
+
+  await storage.putObject({ body, contentType: "image/png", key: KEY });
+
+  assert.equal(fake.bodies[0], body);
+  assert.match(
+    fake.requests[0]!.headers.get("authorization") ?? "",
+    /^AWS4-HMAC-SHA256 /,
+  );
 });

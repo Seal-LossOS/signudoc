@@ -84,6 +84,7 @@ import {
   createEmailService,
   EMAIL_NOT_CONNECTED_MESSAGE,
   isEmailNotConnectedError,
+  isEmailOff,
   resolveEmailAddresses,
   type EmailService,
 } from "./services/email.ts";
@@ -144,6 +145,7 @@ import {
 import { escapeHtml } from "./utils/html.ts";
 import { hasEmbedOrigins, isEmbeddedEnvelope } from "./embedding.ts";
 import { releaseSentWebhook } from "./webhooks/outbox.ts";
+import { defaultDelivery, type Delivery } from "./delivery.ts";
 
 type CreateDraftEnvelopeOptions = {
   database?: DbPool;
@@ -164,9 +166,11 @@ type SendDraftEnvelopeInput = {
   apiKeyId?: string | null;
   /**
    * "embedded": signers sign inside another app (see embedding.ts), so no
-   * invitations or reminders are emailed. API only. "email" by default.
+   * invitations or reminders are emailed. API only. "link": the sender
+   * copies each link and delivers it (see signing-link-copy.ts). Left out,
+   * defaultDelivery decides.
    */
-  delivery?: "email" | "embedded";
+  delivery?: Delivery;
   /** How many days signers get. The default applies when left out. */
   expiresInDays?: number;
   /** Days between automatic reminders. Null or left out means none. */
@@ -516,6 +520,12 @@ export class EnvelopeMutationError extends Error {
   }
 }
 
+const EMAIL_OFF_SEND_MESSAGE =
+  "Email is off on this install, so signers can't be emailed. Send with link delivery, then copy each signer's link from the envelope page.";
+
+const LINK_EMAIL_CODE_MESSAGE =
+  "Email is off on this install, so signers can't be emailed a code. Leave out emailed codes, or give an access code instead.";
+
 /**
  * The email service for a send. With no provider connected, sending is
  * refused with a message that says so, before anything changes, instead of
@@ -596,6 +606,8 @@ const TIMELINE_TONE_MAP: Record<
   declined: "danger",
   email_sent: "neutral",
   expired: "danger",
+  link_copied: "neutral",
+  link_replaced: "neutral",
   reauthentication_failed: "danger",
   reminded_auto: "neutral",
   signer_corrected: "neutral",
@@ -1895,6 +1907,10 @@ function buildTimelineDescription(event: AuditEventRecord): string {
       return "Deadline passed before everyone signed";
     case "signer_corrected":
       return describeSignerCorrectedEvent(event.metadata);
+    case "link_copied":
+      return `Signing link copied for ${targetLabel}`;
+    case "link_replaced":
+      return `Signing link replaced for ${targetLabel}`;
     default:
       return event.event;
   }
@@ -2905,7 +2921,23 @@ export async function sendDraftEnvelope(
     }
   }
 
-  const delivery = input.delivery ?? "email";
+  const delivery = input.delivery ?? defaultDelivery();
+
+  if (delivery === "email" && isEmailOff()) {
+    throw new EnvelopeMutationError(EMAIL_OFF_SEND_MESSAGE, 409);
+  }
+
+  // Nobody can be emailed a code while email is off. Checked again under
+  // the lock below, as for embedded.
+  if (
+    delivery === "link" &&
+    isEmailOff() &&
+    [...(await listSignerCheckSettings(envelopeId, database)).values()].some(
+      (check) => check.requireEmailCode,
+    )
+  ) {
+    throw new EnvelopeMutationError(LINK_EMAIL_CODE_MESSAGE, 400);
+  }
 
   if (delivery === "embedded") {
     if (part11) {
@@ -3092,6 +3124,16 @@ export async function sendDraftEnvelope(
         }
       }
 
+      if (
+        delivery === "link" &&
+        isEmailOff() &&
+        [...(await listSignerCheckSettings(envelopeId, tx)).values()].some(
+          (check) => check.requireEmailCode,
+        )
+      ) {
+        throw new EnvelopeMutationError(LINK_EMAIL_CODE_MESSAGE, 400);
+      }
+
       await tx.query(
         `
           UPDATE signers
@@ -3124,11 +3166,11 @@ export async function sendDraftEnvelope(
         );
       }
 
-      if (delivery === "embedded") {
-        await tx.query(
-          `UPDATE envelopes SET delivery = 'embedded' WHERE id = $1`,
-          [envelopeId],
-        );
+      if (delivery !== "email") {
+        await tx.query(`UPDATE envelopes SET delivery = $2 WHERE id = $1`, [
+          envelopeId,
+          delivery,
+        ]);
       }
 
       if (part11) {
@@ -3204,7 +3246,7 @@ export async function sendDraftEnvelope(
           ipAddress: input.ipAddress ?? null,
           metadata: {
             ...(input.apiKeyId ? { apiKeyId: input.apiKeyId } : {}),
-            ...(delivery === "embedded" ? { delivery } : {}),
+            ...(delivery !== "email" ? { delivery } : {}),
             // The send route refuses a send without this confirmation.
             expiresAt,
             reminderIntervalDays: input.reminderIntervalDays ?? null,
@@ -3240,10 +3282,11 @@ export async function sendDraftEnvelope(
     throw error;
   }
 
-  if (delivery === "embedded") {
+  if (delivery !== "email") {
     // No invitation: the app asks the API for a link for each signer
-    // whose turn it is (see embedding.ts). The envelope is out for
-    // signature now, so its envelope.sent webhook can go.
+    // whose turn it is (see embedding.ts), or the sender copies it (see
+    // signing-link-copy.ts). The envelope is out for signature now, so its
+    // envelope.sent webhook can go.
     await releaseSentWebhook(envelopeId, database).catch((error: unknown) => {
       console.error(
         `Releasing the envelope.sent webhook of ${envelopeId} failed:`,
@@ -3816,7 +3859,9 @@ export async function correctSentEnvelopeSigner(
       [nowUnixTimestamp, envelopeId],
     );
 
-    if (invitationNeeded && issuedLink) {
+    // A link envelope's sender delivers the new link: the next Copy finds
+    // the link replaced and draws a fresh one (signing-link-copy.ts).
+    if (invitationNeeded && issuedLink && envelope.delivery === "email") {
       const mailer =
         emailService ??
         createEmailService(

@@ -22,6 +22,7 @@ import {
 } from "../security/request.ts";
 import { DocumentImportError } from "../services/document-import.ts";
 import { PendingUploadError } from "../services/pending-uploads.ts";
+import { SigningLinkError } from "../signing-link-copy.ts";
 import { TemplateError } from "../templates.ts";
 import { scheduleWebhookDrainIfDue } from "../webhooks/deliver.ts";
 import { describeZodError, type ApiActor } from "./envelopes.ts";
@@ -57,7 +58,7 @@ export function apiErrorFor(error: unknown): Response | null {
       : apiError(400, "invalid_request", error.message);
   }
 
-  if (error instanceof EmbeddingError) {
+  if (error instanceof EmbeddingError || error instanceof SigningLinkError) {
     return apiError(
       error.statusCode,
       codeForStatus(error.statusCode),
@@ -427,6 +428,15 @@ export const API_SEND_LIMIT = {
 /** Signing links for embedded envelopes: per key, every 10 minutes. */
 export const API_EMBED_LINK_LIMIT = {
   key: "api-embed-link",
+  limit: 300,
+  refusal:
+    "This key has asked for too many signing links for now. Wait and try again.",
+  windowMs: 10 * 60 * 1000,
+};
+
+/** Copied signing links for link envelopes: per key, every 10 minutes. */
+export const API_SIGNING_LINK_LIMIT = {
+  key: "api-signing-link",
   limit: 300,
   refusal:
     "This key has asked for too many signing links for now. Wait and try again.",

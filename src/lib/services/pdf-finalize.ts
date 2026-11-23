@@ -1331,6 +1331,13 @@ function describeEmbeddedDelivery(embedded: Record<string, unknown>): string {
   return `a signing link given to the app at ${origin}${key} (embedded signing; identifying the signer was left to that app)`;
 }
 
+/**
+ * For a link the sender copied and delivered: SignuDoc cannot say where it
+ * went, only that whoever signed held it.
+ */
+const LINK_DELIVERY_EVIDENCE =
+  "possession of a signing link the sender delivered themselves (copied from SignuDoc; SignuDoc did not send it)";
+
 /** What the record shows about how one signer was identified and agreed. */
 function describeSignerEvidence(
   signer: SignerRecord,
@@ -1386,7 +1393,9 @@ function describeSignerEvidence(
   const checks = [
     embedded
       ? describeEmbeddedDelivery(embedded)
-      : "possession of the emailed signing link",
+      : embeddedSource?.metadata?.delivery === "link"
+        ? LINK_DELIVERY_EVIDENCE
+        : "possession of the emailed signing link",
     ...readStringArray((signed ?? ended)?.metadata?.authMethods).map(
       (method) => AUTHENTICATION_LABELS[method] ?? method,
     ),
@@ -1496,6 +1505,17 @@ function describeEventEvidence(event: AuditEventRecord): string[] {
 
   if (event.event === "signer_corrected") {
     details.push(describeSignerCorrectedEvent(metadata));
+  }
+
+  // Never the link itself: the event does not hold it.
+  if (event.event === "link_copied" || event.event === "link_replaced") {
+    details.push(
+      `Signing link ${event.event === "link_copied" ? "copied" : "replaced"} for ${
+        typeof metadata.signerName === "string"
+          ? metadata.signerName
+          : "a signer"
+      }`,
+    );
   }
 
   if (event.event === "verified" && typeof metadata.method === "string") {

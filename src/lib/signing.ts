@@ -67,6 +67,7 @@ import {
   createEmailService,
   createLazyEmailService,
   fitsAsAttachments,
+  isEmailOff,
   type EmailAttachment,
   type EmailService,
 } from "./services/email.ts";
@@ -81,6 +82,7 @@ import {
 } from "./services/pdf-finalize.ts";
 import { buildSigningInvitationEmail } from "./services/signing-invitation-email.ts";
 import { readEmbedEvidence } from "./embedding.ts";
+import { readEnvelopeDelivery, type Delivery } from "./delivery.ts";
 import { issueSigningLink } from "./services/signing-links.ts";
 import { signingProviderById } from "./services/signing-providers.ts";
 import {
@@ -1055,6 +1057,8 @@ type Part11SignatureRecord = {
 
 function buildSignedAuditEvent(input: {
   authMethods: readonly SignerCheckMethod[];
+  /** Recorded for link delivery, so the certificate reads it from here. */
+  delivery?: Delivery | null;
   embedded?: { apiKeyName: string | null; origin: string | null } | null;
   envelopeId: string;
   part11?: Part11SignatureRecord | null;
@@ -1087,6 +1091,7 @@ function buildSignedAuditEvent(input: {
       authMethods: [...input.authMethods],
       signatureMethods: [...input.signatureMethods],
       timezoneOffsetMinutes: input.timezoneOffsetMinutes,
+      ...(input.delivery === "link" ? { delivery: "link" } : {}),
       ...(input.embedded ? { embedded: input.embedded } : {}),
       ...(input.part11 ? { part11: input.part11 } : {}),
       ...(input.providerSignature
@@ -1101,6 +1106,7 @@ function buildDeclinedAuditEvent(input: {
   /** The checks the person passed before declining or rejecting. */
   authMethods: readonly string[];
   declinedAt: number;
+  delivery?: Delivery | null;
   embedded?: { apiKeyName: string | null; origin: string | null } | null;
   envelopeId: string;
   reason?: string;
@@ -1123,6 +1129,7 @@ function buildDeclinedAuditEvent(input: {
       signerName: input.signer.name,
       signerOrder: input.signer.signOrder,
       signingStep: signingStepOf(input.signer),
+      ...(input.delivery === "link" ? { delivery: "link" } : {}),
       ...(input.embedded ? { embedded: input.embedded } : {}),
       ...(isApprover(input.signer) ? { role: "approver" } : {}),
       authMethods: [...input.authMethods],
@@ -1440,6 +1447,15 @@ export async function sendSignerEmailCode(
     emailService = createEmailService(),
   }: { database?: DbPool; emailService?: EmailService } = {},
 ): Promise<SignerEmailCodeResult> {
+  // The off service answers "not sent"; saving the code would leave the
+  // signer waiting for one that never comes.
+  if (isEmailOff()) {
+    throw new SigningMutationError(
+      "Email is off on this install, so a code can't be emailed. Ask the sender for help.",
+      409,
+    );
+  }
+
   const context = await resolveSigningContext(token, { database });
   const state = await getSignerCheckState(context.signer.id!, database);
   const now = Math.floor(Date.now() / 1000);
@@ -2755,6 +2771,11 @@ async function submitSigningOnce(
   const embedded = context.signer.id
     ? await readEmbedEvidence(context.envelope.id, context.signer.id, database)
     : null;
+  // Only an emailed envelope emails the next step's invitations.
+  const envelopeDelivery = await readEnvelopeDelivery(
+    context.envelope.id,
+    database,
+  );
   const doneRedirectPath = embedded?.origin
     ? `/embed/sign/${encodeURIComponent(token)}/done?${new URLSearchParams({ origin: embedded.origin, title: context.envelope.title, ...(approval ? { approved: "1" } : {}) }).toString()}`
     : getSigningDoneRedirectPath(token, context.envelope.title, approval);
@@ -2873,6 +2894,7 @@ async function submitSigningOnce(
 
     const signedAuditEvent = buildSignedAuditEvent({
       authMethods: signerChecks.passed,
+      delivery: envelopeDelivery,
       embedded,
       envelopeId: context.envelope.id,
       part11: part11Signature,
@@ -3102,8 +3124,10 @@ async function submitSigningOnce(
 
       // Nobody to invite while others in this step are still signing. In
       // an embedded envelope nobody is emailed: the app starts the next
-      // step's turns, and the signer.signed webhook shows who is next.
-      const invitations = embedded ? [] : nextSignerDeliveries;
+      // step's turns, and the signer.signed webhook shows who is next. In a
+      // link envelope the sender copies the next step's links.
+      const invitations =
+        embedded || envelopeDelivery !== "email" ? [] : nextSignerDeliveries;
 
       for (const nextSignerDelivery of invitations) {
         try {
@@ -3590,6 +3614,7 @@ async function declineSigningOnce(
   const declinedAuditEvent = buildDeclinedAuditEvent({
     authMethods: signerChecks.passed,
     declinedAt,
+    delivery: await readEnvelopeDelivery(context.envelope.id, database),
     embedded,
     envelopeId: context.envelope.id,
     reason: declineReason,

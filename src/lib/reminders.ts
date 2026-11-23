@@ -27,13 +27,14 @@ import {
   createEmailService,
   EMAIL_NOT_CONNECTED_MESSAGE,
   isEmailNotConnectedError,
+  isEmailOff,
   type EmailService,
 } from "./services/email.ts";
 import {
   buildDeadlineLine,
   describeRequestedAction,
 } from "./services/signing-invitation-email.ts";
-import { isEmbeddedEnvelope } from "./embedding.ts";
+import { readEnvelopeDelivery, type Delivery } from "./delivery.ts";
 import { withUserEmailLegalFooter } from "./services/email-legal-footer.ts";
 import {
   formatReminderAvailableAt,
@@ -46,8 +47,24 @@ import {
 } from "./services/signing-links.ts";
 import { escapeHtml } from "./utils/html.ts";
 
+/**
+ * Why SignuDoc does not remind this envelope's signers, or null when it
+ * emails them. A reminder would also retire the link they hold.
+ */
+function deliveryRefusal(delivery: Delivery | null): string | null {
+  if (delivery === "embedded") {
+    return "This envelope is signed in another app, so SignuDoc does not email its signers.";
+  }
+
+  if (delivery === "link") {
+    return "You deliver this envelope's signing links yourself, so SignuDoc does not email its signers. Copy a signer's link and send it to them again.";
+  }
+
+  return null;
+}
+
 type ReminderEnvelopeRow = {
-  delivery: "email" | "embedded";
+  delivery: Delivery;
   expiresAt: number | null;
   id: string;
   ownerEmail: string;
@@ -394,13 +411,12 @@ async function persistReminder(
     }
 
     // Checked again under the lock: the envelope may have been sent for
-    // another app to sign since the early check, and a reminder would
-    // retire the link that app holds.
-    if (persistedEnvelope.delivery === "embedded") {
-      throw new ReminderMutationError(
-        "This envelope is signed in another app, so SignuDoc does not email its signers.",
-        409,
-      );
+    // another app to sign, or by link, since the early check, and a
+    // reminder would retire the link that app or the sender holds.
+    const notEmailed = deliveryRefusal(persistedEnvelope.delivery);
+
+    if (notEmailed) {
+      throw new ReminderMutationError(notEmailed, 409);
     }
 
     // The deadline may have been moved since the link was issued. From
@@ -686,11 +702,21 @@ export async function sendManualEnvelopeNudge(
     nowUnixTimestamp = Math.floor(Date.now() / 1000),
   }: SendReminderOptions = {},
 ) {
-  // Its signers sign in another app, which reminds them itself. A reminder
-  // would also retire the link that app holds.
-  if (await isEmbeddedEnvelope(envelopeId, database, userId)) {
+  // Its signers sign in another app, which reminds them itself, or have
+  // links the sender delivered. A reminder would also retire that link.
+  const notEmailed = deliveryRefusal(
+    await readEnvelopeDelivery(envelopeId, database, userId),
+  );
+
+  if (notEmailed) {
+    throw new ReminderMutationError(notEmailed, 409);
+  }
+
+  // The reminder retires the signer's link; with email off the new one
+  // would reach nobody.
+  if (isEmailOff()) {
     throw new ReminderMutationError(
-      "This envelope is signed in another app, so SignuDoc does not email its signers.",
+      "Email is off on this install, so reminders can't be sent.",
       409,
     );
   }
@@ -810,7 +836,12 @@ export async function sendAutomaticEnvelopeReminder(
     signerId?: string;
   } = {},
 ): Promise<boolean> {
-  if (await isEmbeddedEnvelope(envelopeId, database)) {
+  // Nothing would reach the signer, and the reminder retires their link.
+  if (isEmailOff()) {
+    return false;
+  }
+
+  if (deliveryRefusal(await readEnvelopeDelivery(envelopeId, database))) {
     return false;
   }
 

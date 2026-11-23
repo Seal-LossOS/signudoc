@@ -125,8 +125,9 @@ function applySecurityHeaders(
   pathname: string,
   searchParams: URLSearchParams,
 ) {
-  // Only an embedded signing page may be framed, and only by the site its
-  // link names (see src/lib/embed-origin.ts). Everything else, never.
+  // An embedded signing page may be framed only by the site its link names;
+  // the app's own pages only by APP_FRAME_ORIGIN (Sunday); signer pages,
+  // downloads and the API never (see src/lib/embed-origin.ts).
   const frameAncestors = frameAncestorsFor(pathname, searchParams);
 
   response.headers.set(

@@ -87,6 +87,8 @@ export const auditEventTypes = [
   "signer_corrected",
   "approved",
   "rejected",
+  "link_copied",
+  "link_replaced",
 ] as const;
 
 /**

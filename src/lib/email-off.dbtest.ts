@@ -32,6 +32,7 @@ import {
 import {
   recordSignerConsent,
   sendSignerEmailCode,
+  SigningMutationError,
   submitSigningForToken,
 } from "./signing.ts";
 
@@ -39,7 +40,6 @@ import {
 // envelopes out, against a real Postgres: nothing that was not sent may be
 // recorded as sent, and nothing may be lost because it was not. Envelopes
 // are sent under the capture driver, then EMAIL_DRIVER is switched to off.
-// The todo cases are K11's to fix (envelopes.ts, signing.ts, reminders.ts).
 // Run with `npm run test:db`.
 
 process.env.APP_URL ??= "https://sign.example.test";
@@ -399,69 +399,59 @@ test("asking for new download links while email is off is refused and keeps the 
   assert.deepEqual(await linkHashes(), before);
 });
 
-test(
-  "a sender's reminder while email is off is refused and keeps the signer's link",
-  { todo: "K11 fixes reminders.ts" },
-  async () => {
-    const envelope = await sendUnderCapture();
-    const linkBefore = (await signerRow(envelope.signer.id))
-      ?.signing_token_hash;
+test("a sender's reminder while email is off is refused and keeps the signer's link", async () => {
+  const envelope = await sendUnderCapture();
+  const linkBefore = (await signerRow(envelope.signer.id))?.signing_token_hash;
 
-    process.env.EMAIL_DRIVER = "off";
+  process.env.EMAIL_DRIVER = "off";
 
-    // Today the reminder retires the link and emails the new one to nobody.
-    await assert.rejects(
-      sendManualEnvelopeNudge(envelope.userId, envelope.envelopeId, SENDER, {
-        database,
-      }),
-      (error: unknown) =>
-        error instanceof ReminderMutationError && error.statusCode === 409,
-    );
-    assert.equal(
-      (await signerRow(envelope.signer.id))?.signing_token_hash,
-      linkBefore,
-    );
-  },
-);
-
-test(
-  "the daily reminder while email is off sends nothing and keeps the signer's link",
-  { todo: "K11 fixes reminders.ts" },
-  async () => {
-    const envelope = await sendUnderCapture({ reminderIntervalDays: 1 });
-    const linkBefore = (await signerRow(envelope.signer.id))
-      ?.signing_token_hash;
-
-    process.env.EMAIL_DRIVER = "off";
-
-    const sent = await sendAutomaticEnvelopeReminder(envelope.envelopeId, {
+  // A reminder would retire the link and email the new one to nobody.
+  await assert.rejects(
+    sendManualEnvelopeNudge(envelope.userId, envelope.envelopeId, SENDER, {
       database,
-      nowUnixTimestamp: Math.floor(Date.now() / 1000) + 2 * DAY,
-      signerId: envelope.signer.id,
-    });
+    }),
+    (error: unknown) =>
+      error instanceof ReminderMutationError && error.statusCode === 409,
+  );
+  assert.equal(
+    (await signerRow(envelope.signer.id))?.signing_token_hash,
+    linkBefore,
+  );
+});
 
-    assert.equal(sent, false);
-    assert.equal(
-      (await signerRow(envelope.signer.id))?.signing_token_hash,
-      linkBefore,
-    );
-  },
-);
+test("the daily reminder while email is off sends nothing and keeps the signer's link", async () => {
+  const envelope = await sendUnderCapture({ reminderIntervalDays: 1 });
+  const linkBefore = (await signerRow(envelope.signer.id))?.signing_token_hash;
 
-test(
-  "a signer's emailed code while email is off is refused, not reported as sent",
-  { todo: "K11 fixes signing.ts" },
-  async () => {
-    const envelope = await sendUnderCapture();
+  process.env.EMAIL_DRIVER = "off";
 
-    await database.query(
-      `update signers set require_email_code = true where id = $1`,
-      [envelope.signer.id],
-    );
-    process.env.EMAIL_DRIVER = "off";
+  const sent = await sendAutomaticEnvelopeReminder(envelope.envelopeId, {
+    database,
+    nowUnixTimestamp: Math.floor(Date.now() / 1000) + 2 * DAY,
+    signerId: envelope.signer.id,
+  });
 
-    // Today it answers sent: true and leaves a code nobody received.
-    await assert.rejects(sendSignerEmailCode(envelope.token, { database }));
-    assert.equal((await signerRow(envelope.signer.id))?.email_code_hash, null);
-  },
-);
+  assert.equal(sent, false);
+  assert.equal(
+    (await signerRow(envelope.signer.id))?.signing_token_hash,
+    linkBefore,
+  );
+});
+
+test("a signer's emailed code while email is off is refused, not reported as sent", async () => {
+  const envelope = await sendUnderCapture();
+
+  await database.query(
+    `update signers set require_email_code = true where id = $1`,
+    [envelope.signer.id],
+  );
+  process.env.EMAIL_DRIVER = "off";
+
+  // Answering sent would leave a code nobody received.
+  await assert.rejects(
+    sendSignerEmailCode(envelope.token, { database }),
+    (error: unknown) =>
+      error instanceof SigningMutationError && error.statusCode === 409,
+  );
+  assert.equal((await signerRow(envelope.signer.id))?.email_code_hash, null);
+});

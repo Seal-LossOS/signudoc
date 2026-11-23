@@ -146,6 +146,26 @@ A deployment made with the button needs no environment variables. These are ther
 | `AUDIT_LOG`                                         | `off` keeps audit rows out of the function logs. See [Send the audit trail to your SIEM](#send-the-audit-trail-to-your-siem).                                                                          |
 | `SSO_ISSUER`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`  | Sign in through your organization's identity provider (Okta, Entra ID, Google Workspace). `PASSWORD_SIGN_IN=off` then turns passwords off. See [Single sign-on](#single-sign-on).                      |
 
+### Files in an S3-compatible store
+
+Set `STORAGE_DRIVER=s3` with `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`, and `S3_KEY_PREFIX` to put every file under one folder of the bucket. Cloudflare R2, AWS S3 and MinIO all work; R2 takes `S3_REGION=auto`. The bucket stays private and is addressed path-style. Only the server reads and writes it: browsers never upload to or download from the store directly. Backups of the files are the store's own job; `BACKUP_BLOB_READ_WRITE_TOKEN` covers the Blob store only.
+
+### Email through Postmark, or none
+
+Set `EMAIL_DRIVER=postmark` with `POSTMARK_TOKEN` (a server token) and `POSTMARK_FROM_EMAIL` (a verified sender), and `POSTMARK_MESSAGE_STREAM` if the stream is not `outbound`. Until both the token and the sender are set, the install sends no email, as with `off`, and Settings says which setting is missing. Open and link tracking are off on every message. Postmark caps a message's attachments at 7 MiB, so SignuDoc attaches the files only when they fit. `EMAIL_DRIVER=off` sends nothing, in any environment: senders copy each signer's link, see [Link delivery](#link-delivery).
+
+### Link delivery
+
+A send with `delivery: "link"` emails no invitation. The sender copies each signer's link from the envelope page with Copy link and sends it to them. New link replaces the signer's link, and the old one stops working; until then the link stays the same. The certificate records the signer's identity as possession of a link the sender delivered, not of an email, and logs each copy and replacement without the link itself. `DEFAULT_SIGNING_DELIVERY=link` makes a send that names no delivery a link send; unset, the default is email, or link while email is off.
+
+### Inside a portal
+
+`APP_FRAME_ORIGIN` names one site, such as an intranet portal, that may show this app's pages in a frame. Signing pages, downloads and the API are never framed, whatever it is set to. Pages in the frame post three messages to the portal: `signudoc:ready`, `signudoc:navigated` and `signudoc:signed-out`, each with the path (pathname and query only). A path the portal passes in is accepted only under `/dashboard`, `/envelopes`, `/templates` or `/settings`.
+
+### Signing in from Sunday
+
+Sunday, the workspace app, can sign people in here without a second password. Set all three or none: `SUNDAY_BRIDGE_SECRET` (shared with Sunday, 32 characters or more), `SUNDAY_WORKSPACE_ID` (Sunday's workspace id) and `SUNDAY_ORIGIN` (Sunday's address). With them and `PASSWORD_SIGN_IN=off`, only the addresses in `PASSWORD_SIGN_IN_ALLOWED_EMAILS` keep a password. A person's role is set when their account is created and does not follow later changes in Sunday. A Sunday sign-in into an existing account skips SignuDoc's two-step sign-in check, as single sign-on does.
+
 ## Set the site up
 
 The first time you open a new install it takes you to `/setup`. There you name your organization, give its support address, and create the first account, which becomes the administrator. After that the setup page is gone for good.

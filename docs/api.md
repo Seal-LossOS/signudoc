@@ -167,7 +167,10 @@ Things to know:
   are as in the web app, and `signatureLevel` is `advanced` or `qualified` on
   installs with a signing provider. `"delivery": "embedded"` sends no
   emails and has your app show the signing page instead (see
-  [Embedded signing](#embedded-signing)); the default is `"email"`.
+  [Embedded signing](#embedded-signing)). `"delivery": "link"` sends no
+  emails either; you deliver each link (see [Link delivery](#link-delivery)).
+  The default is `"email"`, or `"link"` while email is off on the install;
+  the install's `DEFAULT_SIGNING_DELIVERY` can change it.
 - **All or nothing.** If anything about the request is wrong, a field off
   its page or a signer without a signature field, nothing is kept: no
   half-made draft is left behind.
@@ -280,6 +283,7 @@ To know when something happens without asking again and again, use
 | `POST /api/v1/envelopes/{id}/void`                          | write  | Voids a sent envelope. Body: `{"reason": "…"}`, required on Part 11 installs.                                                                                                                           |
 | `POST /api/v1/envelopes/{id}/remind`                        | write  | Emails a reminder to each signer whose turn it is, at most once a day as in the web app. Too soon gets 429 with `Retry-After`.                                                                          |
 | `POST /api/v1/envelopes/{id}/signers/{signerId}/embed-link` | write  | A signing link for an embedded envelope, to show in a frame. Body: `{"origin": "https://…"}`. See [Embedded signing](#embedded-signing).                                                                |
+| `POST /api/v1/envelopes/{id}/signers/{signerId}/link`       | write  | A signing link for a signer of a link envelope, to deliver yourself. `?replace=true` makes a new one. See [Link delivery](#link-delivery).                                                              |
 | `DELETE /api/v1/envelopes/{id}`                             | write  | Deletes a draft.                                                                                                                                                                                        |
 | `GET /api/v1/envelopes/{id}/events`                         | read   | The audit trail, oldest first.                                                                                                                                                                          |
 | `GET /api/v1/envelopes/{id}/files/signed`                   | read   | The signed PDF.                                                                                                                                                                                         |
@@ -546,3 +550,31 @@ status in the API, which are signed or authenticated.
 For a page on your own machine while developing, set
 `EMBED_ALLOW_HTTP_ORIGINS=1` to allow `http://` origins; it is ignored on
 Vercel.
+
+## Link delivery
+
+With `"delivery": "link"` on create or `send`, SignuDoc sends no invitations
+and no reminders. Your app, or a person, delivers each signer's link. Ask for
+it when it is that signer's turn (their `status` is `notified`):
+
+```sh
+curl -X POST "https://sign.example.com/api/v1/envelopes/8c1d…/signers/51ab…/link?replace=true" \
+  -H "Authorization: Bearer sdk_…"
+```
+
+```json
+{
+  "object": "signing_link",
+  "url": "https://sign.example.com/sign/…",
+  "expiresAt": "2026-11-18T09:15:00.000Z"
+}
+```
+
+- The link is stable until replaced: without `replace=true` the answer is the
+  link you already have. `replace=true` makes a new one, and the old one stops
+  working at once.
+- Reminders are refused on a link envelope (`/remind` answers 409): the
+  sender chases its signers.
+- A link is refused with 409 when it is not that signer's turn, the envelope
+  is not out for signature or is finished, or the envelope was sent another
+  way. Asks are rate limited per key.
